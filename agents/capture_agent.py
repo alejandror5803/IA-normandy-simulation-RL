@@ -12,6 +12,5 @@ class capture_agent:
 
     def reset(self):
         pass
-
     def take_decision(self, state):
         pass

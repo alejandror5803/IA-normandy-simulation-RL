@@ -56,3 +56,42 @@ WATER	0.0	99	Agua — infranqueable
 
 
 Posible implementacion de Perbatin (Si sobra tiempo) [nivel de locura de las tropas]
+
+
+
+CONTENIDO DE LA PAGINA DEL CANVA:
+La practica se basara en la simulación de la batalla de Normandía mediante RL, el equipo azul (los alemanes) comenzaran siendo el equipo que aprenda mediante RL.
+
+ 
+
+El agente del equipo azul, debe gestionar las cadenas de suministro para reabastecer a los tanques, gestionar los pelotones de tanques, dividir la fuerza inicial (20 tanques) en pelotones, tomar los puntos A,B,C del mapa, siendo B el mas valioso debido a su posición estratégica. Debe de poder defender a sus tropas/pelotones, atacando a las fuerzas enemigas y escondiéndose detrás de coberturas apropiadas.
+
+ 
+
+Una vez que el agente del equipo azul aprenda y funcione bien, la idea es trasladar esto mismo al equipo rojo, para simular la batalla de caen mediante 2 agentes que controlan a un equipo cada uno usando RL.
+
+ 
+
+El equipo azul (Alemania) tiene una desventaja de que parte con una inferioridad de 3:1 según datos históricos -- (por cada tanque alemán hay 3 tanques aliados)
+
+Los tanques Alemanes deben de tener mas blindaje/vida que los aliados (datos históricos)
+
+ 
+
+Dado que son muchas decisiones las que debe de tomar, la estructura agentica sera la siguiente:
+
+ 
+
+Peloton individual:
+
+Agente de ataque
+Agente de captura
+Agente de suministros
+Agente de cobertura/defensa
+Agente Comandante 
+Estrategia:
+
+Agente de dominacion
+Agente de status (como esta cada peloton)
+Agente Principal (field marshal) (Toma la decision final basada en lo comunicado por cada agente)
+ 
