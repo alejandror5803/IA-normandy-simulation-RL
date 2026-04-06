@@ -12,7 +12,10 @@ TERRAIN_TYPES = {
     "WATER":  {"cover": 0.0, "penalization": 99},
 }
 
-# Accumulated probabilities for each terrain type
+# terrain types that block movement
+IMPASSABLE = {"WATER", "WALL"}
+
+# accumulated probability thresholds for random terrain generation
 TERRAIN_THRESHOLDS = [
     (0.10, "WATER"),
     (0.20, "WALL"),
@@ -35,33 +38,28 @@ POINT_SUPPLY_LIMITS = {
     "ammo": 50,
 }
 
-class MapGenerator:
-    """Generates the 2D grid and the positions of the points of interest"""
 
-    def __init__(self, size: int = 25, seed: int = 42):
+class MapGenerator:
+
+    def __init__(self, size=25, seed=42):
         self.size = size
         random.seed(seed)
 
-    def _pick_terrain(self) -> str:
-        """
-        Returns a terrain type based on the defined probabilities
-        Defaults to OPEN if no threshold is matched
-        """
+    def _pick_terrain(self):
         rand = random.random()
         for threshold, terrain in TERRAIN_THRESHOLDS:
             if rand < threshold:
                 return terrain
         return "OPEN"
 
-    def generate_map(self) -> list[list[dict]]:
-        """
-        Generates the grid with procedural terrain
-        Capture points are forced to OPEN to ensure they are accessible
-        """
-        grid = [
-            [{"type": t, **TERRAIN_TYPES[t]} for t in (self._pick_terrain() for _ in range(self.size))]
-            for _ in range(self.size)
-        ]
+    def generate_map(self):
+        grid = []
+        for _ in range(self.size):
+            row = []
+            for _ in range(self.size):
+                t = self._pick_terrain()
+                row.append({"type": t, **TERRAIN_TYPES[t]})
+            grid.append(row)
 
         # Ensure A, B, C are never blocked by impassable terrain
         for col, row in FIXED_POINTS.values():
@@ -73,3 +71,9 @@ class MapGenerator:
     def get_points() -> dict[str, tuple[int, int]]:
         """Returns the positions of the capture points"""
         return FIXED_POINTS
+
+    @staticmethod
+    def is_passable(grid, x, y):
+        if not (0 <= x < len(grid[0]) and 0 <= y < len(grid)):
+            return False
+        return grid[y][x]["type"] not in IMPASSABLE

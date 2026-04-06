@@ -1,19 +1,33 @@
-import gymnasium as g
-import numpy as np
-from agents import command_agent, red_agent
+from env.normandy_env import NormandyEnv
 
-def train_agent(env, agent, episodes=1000):
-    for episode in range(episodes):
-        state, _ = env.reset()
-        done = False
+
+def train(episodes=500):
+    env = NormandyEnv()
+
+    for ep in range(episodes):
+        obs, _ = env.reset()
         total_reward = 0
+        done = False
 
         while not done:
-            action = agent.act(state)
-            next_state, reward, terminated, truncated, _ = env.step(action)
-            agent.observe((state, action, reward, next_state, terminated))
-            state = next_state
-            total_reward += reward
+            # commander agent not implemented yet, using random actions as placeholder
+            actions = env.action_space.sample()
+            obs, rewards, terminated, truncated, info = env.step(actions)
+            total_reward += sum(rewards)
             done = terminated or truncated
 
-        print(f"Episode {episode + 1}: Total Reward: {total_reward}")
+        if (ep + 1) % 50 == 0:
+            caps = sum(1 for v in info['captured'].values() if v)
+            print(
+                f"ep {ep + 1:4d}  "
+                f"reward={total_reward:8.1f}  "
+                f"blue={info['blue_alive']}  "
+                f"red={info['red_alive']}  "
+                f"captured={caps}/3"
+            )
+
+    env.close()
+
+
+if __name__ == "__main__":
+    train()
