@@ -1,110 +1,95 @@
-from units import distance
+from env.units import distance
+from env.map_generator import IMPASSABLE
 
-'''
-It returns the closest enemy. If there is not enemies alive, returns None.
-'''
-def get_closest_enemy(platoon, enemies):
-    closest_enemy = None
-    min_dist = 999999
-
-    for enemy in enemies:
-        if enemy.is_alive():
-            d = distance(platoon.position, enemy.position)
-            if d < min_dist:
-                min_dist = d
-                closest_enemy = enemy
-
-    return closest_enemy
+ATTACK_RANGE = 3
+DAMAGE_PER_ATTACK = 20   # base damage per shot (multiplied by num_tanks alive)
 
 
-'''
-It checks if an enemy is in range.
-'''
-def enemy_in_range(platoon, enemy, attack_range=3):
-    if enemy is None:
-        return False
-
-    return distance(platoon.position, enemy.position) <= attack_range
-
-'''
-If the closest enemy is in range, it attacks.
-It returns:
-    - reward
-    - damage
-    - target
-'''
-def attack_closest_enemy(platoon, enemies, attack_range=3):
-    target = get_closest_enemy(platoon, enemies)
-
-    if target is None:
-        return -5, 0, None
-
-    if not enemy_in_range(platoon, target, attack_range):
-        return -2, 0, target
-
-    old_hp = target.hp
-    damage = platoon.attack(target)
-
-    if damage == 0:
-        return -1, 0, target
-
-    reward = 10
-
-    # Recompensa extra si destruye al enemigo
-    if old_hp > 0 and not target.is_alive():
-        reward += 50
-
-    return reward, damage, target
-
-'''
-Returns how many plattons are still alive
-'''
-def count_alive_platoons(platoons):
-    count = 0
-    for platoon in platoons:
-        if platoon.is_alive():
-            count += 1
-    return count
+def get_enemies_in_range(peloton, all_enemies, attack_range=ATTACK_RANGE):
+    in_range = []
+    for enemy in all_enemies:
+        if enemy['num_tanks'] <= 0:
+            continue
+        if distance(peloton['pos'], enemy['pos']) <= attack_range:
+            in_range.append(enemy)
+    return in_range
 
 
-'''
-Returns True if there are no platoons alive
-'''
-def team_defeated(platoons):
-    return count_alive_platoons(platoons) == 0
+def get_nearest_enemy(peloton, all_enemies):
+    nearest = None
+    min_dist = 99999
+    for enemy in all_enemies:
+        if enemy['num_tanks'] <= 0:
+            continue
+        d = distance(peloton['pos'], enemy['pos'])
+        if d < min_dist:
+            min_dist = d
+            nearest = enemy
+    return nearest, min_dist
 
-'''
-It returns a tuple with the platoon hp, the remaining fuel and ammunation,
-and the distance to the closest enemy.
-'''
-def get_combat_state(platoon, enemies):
-    
-    own_state = platoon.get_state()
-    closest_enemy = get_closest_enemy(platoon, enemies)
 
-    if closest_enemy is None:
-        enemy_dist = 10
+def do_attack(attacker, target, target_cover=0.0):
+    if attacker['ammo'] <= 0 or attacker['num_tanks'] <= 0:
+        return 0
+
+    base_damage = DAMAGE_PER_ATTACK * attacker['num_tanks']
+    actual_damage = int(base_damage * (1.0 - target_cover))
+
+    attacker['ammo'] -= 1
+    target['hp'] -= actual_damage
+    if target['hp'] < 0:
+        target['hp'] = 0
+
+    # recalculate remaining tanks from hp (each tank has 100hp)
+    target['num_tanks'] = target['hp'] // 100
+
+    return actual_damage
+
+
+def get_cover_type_int(cover_value):
+    # maps terrain cover float to the 3 levels used by defense_agent
+    # 0 = no cover, 1 = light cover (bush/rubble), 2 = heavy cover (forest/wall)
+    if cover_value <= 0.0:
+        return 0
+    elif cover_value <= 0.5:
+        return 1
     else:
-        enemy_dist = min(distance(platoon.position, closest_enemy.position), 10)
+        return 2
 
-    return own_state + (enemy_dist,)
 
-'''
-It decides if it is worth it to attack
-'''
-def should_attack(platoon, enemies, attack_range=3):
-    target = get_closest_enemy(platoon, enemies)
+def get_best_cover_cell(peloton, grid, map_size):
+    # looks at the 4 adjacent cells and returns the one with the best cover
+    # returns None if no adjacent cell is better than current
+    px, py = peloton['pos']
+    current_cover = grid[py][px]['cover']
+    best_cover = current_cover
+    best_pos = None
 
-    if target is None:
-        return False
+    for dx, dy in [(0, -1), (0, 1), (1, 0), (-1, 0)]:
+        nx, ny = px + dx, py + dy
+        if 0 <= nx < map_size and 0 <= ny < map_size:
+            cell = grid[ny][nx]
+            if cell['type'] not in IMPASSABLE and cell['cover'] > best_cover:
+                best_cover = cell['cover']
+                best_pos = (nx, ny)
 
-    if not platoon.is_alive():
-        return False
+    return best_pos
 
-    if platoon.ammo <= 0:
-        return False
 
-    if not enemy_in_range(platoon, target, attack_range):
-        return False
+def do_resupply(peloton, point_data):
+    fuel_needed = 100 - peloton['fuel']
+    ammo_needed = 100 - peloton['ammo']
 
-    return True
+    fuel_given = min(fuel_needed, point_data['gas'])
+    ammo_given = min(ammo_needed, point_data['ammo'])
+
+    peloton['fuel'] += fuel_given
+    peloton['ammo'] += ammo_given
+    point_data['gas']  -= fuel_given
+    point_data['ammo'] -= ammo_given
+
+    return (fuel_given + ammo_given) > 0
+
+
+def all_dead(pelotons):
+    return all(p['num_tanks'] <= 0 for p in pelotons)
