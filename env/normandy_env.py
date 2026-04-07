@@ -8,33 +8,25 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 import random
-from env.map_generator import MapGenerator, FIXED_POINTS, POINT_SUPPLY_LIMITS
-"""
-#from env.combat_logic import CombatLogic
 
+from env.map_generator import MapGenerator, FIXED_POINTS, POINT_SUPPLY_LIMITS, IMPASSABLE
+from env.combat_logic import (
+    get_enemies_in_range, get_nearest_enemy, do_attack,
+    get_best_cover_cell, get_cover_type_int, do_resupply,
+    all_dead, ATTACK_RANGE
+)
+from env.units import distance
 
-# Importamos nuestros módulos
-from combat_logic import (move_peloton, apply_combat, can_attack, resupply, 
-                          take_cover, update_peloton_state, create_peloton,
-                          GAS_PER_MOVE, AMMO_PER_ATTACK, MAX_GAS, MAX_AMMO,
-                          TANKS_PER_PELOTON, HP_PER_TANK, PELOTON_MAX_HP)
-from map_generator import MapGenerator, TERRAIN_TYPES, MAP_SIZE
+from agents.attack_agent  import attack_agent,  SHOOT
+from agents.defense_agent import defense_agent, TAKE_COVER
+from agents.capture_agent import capture_agent, MOVE_UP, MOVE_DOWN, MOVE_LEFT, MOVE_RIGHT, STAY
 
-# ============================================================================
-# CONSTANTES DEL ENTORNO
-# ============================================================================
+NUM_BLUE = 4
+NUM_RED  = 12
+MAP_SIZE = 25
+MAX_STEPS = 500
 
-"""
-
-NUM_BLUE_PELOTONS = 4
-NUM_RED_PELOTONS = 12   # Ratio 3:1 (12 reds vs 4 blues)
-ATTACK_RANGE     = 5            # Maximum cells to be able to attack
-OBSERVATION_RADIUS = 5          # Each peloton sees an 11x11 area around itself
-# [CUSTOMIZATION] Increase OBSERVATION_RADIUS for more visibility (harder to learn)
-# Decrease it for more fog of war (more realistic but harder)
-
-
-# Possible Actions
+# commander action IDs
 ACTION_MOVE_NORTH = 0
 ACTION_MOVE_SOUTH = 1
 ACTION_MOVE_EAST  = 2
@@ -44,123 +36,86 @@ ACTION_TAKE_COVER = 5
 ACTION_RESUPPLY   = 6
 ACTION_HOLD       = 7
 
-# Rewards
-REWARD_CAPTURE_POINT = 100      # Base para capturar A o C
-REWARD_CAPTURE_B     = 200      # B es más valioso
-REWARD_DAMAGE_ENEMY  = 2        # Por cada punto de daño al enemigo
-PENALTY_DAMAGE_SELF  = -1       # Por cada punto de daño recibido
-REWARD_SUPPLY        = 10       # Por recoger suministros
-PENALTY_TANK_LOST    = -50      # Por perder un tanque
-REWARD_WIN           = 1000     # Por capturar todos los puntos
-PENALTY_LOSE         = -500     # Por ser aniquilado
-STEP_PENALTY         = -0.1     # Penalización por paso para fomentar eficiencia
+# rewards / penalties
+R_CAPTURE_A_C   = 100
+R_CAPTURE_B     = 200
+R_DESTROY_ENEMY = 50
+R_RESUPPLY      = 10
+R_WIN           = 1000
+P_LOSE          = -500
+P_STEP          = -0.1
 
-IMPASSABLE = {"WATER", "WALL"}
+# observation vector size (one per blue peloton)
 OBS_SIZE = 16
 # ============================================================================
 # CLASE PRINCIPAL DEL ENTORNO
 # ============================================================================
 
 class NormandyEnv(gym.Env):
-    """
-    Entorno multi-agente (4 agentes azules) con Gymnasium.
-    El método step recibe una lista de 4 acciones (una por pelotón).
-    """
-    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 4}
-    
+
+    metadata = {"render_modes": ["human"], "render_fps": 4}
+
     def __init__(self, render_mode=None, seed=42):
         super().__init__()
 
-        self.size = MAP_SIZE
         self.render_mode = render_mode
-        self.seed = seed 
-        
-        if seed is not None:
-            random.seed(seed)
-            np.random.seed(seed)
-        
-        # Generador de mapas
-        self.map_gen = MapGenerator(seed=seed)
-        #self.combat = CombatLogic()
-        
-        # Espacios de acción y observación
-        # Cada agente tiene 8 acciones discretas
-        self.action_space = spaces.MultiDiscrete([8] * NUM_BLUE_PELOTONS)
-        
-        # Observación: para simplificar, devolvemos una lista de 4 observaciones (una por agente)
-        # Cada observación es un diccionario con 'grid' (ventana local) y 'status' (recursos)
-        # Gymnasium espera un solo espacio, pero podemos usar spaces.Dict para multi-agente
-        # En la práctica, haremos que el step devuelva una lista de observaciones.
-        # Para cumplir con la API de Gymnasium, definimos un espacio que contiene 4 observaciones.
-        
-        # Its an observation space wich is a tuple of NUM_BLUE_PELOTONS con
-        #El peloton puede no estar visible con -1 y 1000 será con full HP, fuel y ammo.
-        self.observation_space = spaces.Tuple([
-            spaces.Box(low=0, high=9, shape=(OBS_SIZE,), dtype=np.float32)
-            for _ in range(NUM_BLUE_PELOTONS)
-        ])
-        """
-        CELL_ENEMY = 6
-        CELL_ALLY  = 7
-        CELL_POINT = 8
-        CELL_SELF  = 9 
-        """ 
-        
-        # Estado interno
-        self.map = None
-        self.points = None          # Diccionario con posiciones y suministros de A,B,C
-        self.blue_pelotons = []     # Lista de dicts de pelotones azules
-        self.red_pelotons = []      # Lista de dicts de pelotones rojos
-        self.captured_points = {'A': False, 'B': False, 'C': False}
-        self.step_count = 0
-        self.max_steps = 500
-        #self.done = False esto servirá para algo?
-        
-        # Para renderizado (opcional)
-        self.window = None
-        self.clock = None
-        
+        self.map_gen = MapGenerator(size=MAP_SIZE, seed=seed)
 
-        # Inicializar
+        # commander sends one action per blue peloton
+        self.action_space = spaces.MultiDiscrete([8] * NUM_BLUE)
+
+        # each blue peloton has a flat observation vector of 16 values (range 0-9)
+        self.observation_space = spaces.Tuple([
+            spaces.Box(low=0.0, high=9.0, shape=(OBS_SIZE,), dtype=np.float32)
+            for _ in range(NUM_BLUE)
+        ])
+
+        # one set of sub-agents per blue peloton
+        self.attack_agents  = [attack_agent()  for _ in range(NUM_BLUE)]
+        self.defense_agents = [defense_agent() for _ in range(NUM_BLUE)]
+        self.capture_agents = [capture_agent() for _ in range(NUM_BLUE)]
+
+        self.map            = None
+        self.blue_pelotons  = []
+        self.red_pelotons   = []
+        self.points         = {}
+        self.captured       = {'A': False, 'B': False, 'C': False}
+        self.step_count     = 0
+
+        self.window = None
+        self.clock  = None
+
         self.reset()
-    
-    # You create a peloton
-    def _make_peloton(self, x, y, team):
-        """Creates a peloton dict at position (x, y)."""
+
+    def _make_peloton(self, x, y, team, pid, hp=500, num_tanks=5):
         return {
-            "pos":       [x, y],
-            "hp":        500,
-            "num_tanks": 5,
-            "ammo":      100,
-            "fuel":      100,
-            "cover":     0.0,
-            "team":      team,
-            "in_cover":  False
+            'id':        pid,
+            'team':      team,
+            'pos':       [x, y],
+            'hp':        hp,
+            'num_tanks': num_tanks,
+            'ammo':      100,
+            'fuel':      100,
         }
 
     def _is_passable(self, x, y):
-        """Returns True if (x, y) is within bounds and walkable terrain."""
-        if not (0 <= x < self.size and 0 <= y < self.size):
+        if not (0 <= x < MAP_SIZE and 0 <= y < MAP_SIZE):
             return False
-        return self.map[y][x]["type"] not in IMPASSABLE
-    
-    def _find_free_cell(self, x_range, y_range):
-        """Returns a random passable (x, y) within the given ranges."""
-        while True:
-            x = random.randint(*x_range)
-            y = random.randint(*y_range)
+        return self.map[y][x]['type'] not in IMPASSABLE
+
+    def _find_free_cell(self, x_min, x_max, y_min, y_max):
+        for _ in range(500):
+            x = random.randint(x_min, x_max)
+            y = random.randint(y_min, y_max)
             if self._is_passable(x, y):
                 return x, y
-            
-    def _manhattan(self, a, b):
-        """Manhattan distance between two pelotons."""
-        return abs(a["pos"][0] - b["pos"][0]) + abs(a["pos"][1] - b["pos"][1])
-
-    def _clamp_pos(self, peloton):
-        """Keeps peloton inside map bounds."""
-        peloton["pos"][0] = max(0, min(self.size - 1, peloton["pos"][0]))
-        peloton["pos"][1] = max(0, min(self.size - 1, peloton["pos"][1]))
-
+        # fallback: search the whole map
+        for _ in range(1000):
+            x = random.randint(0, MAP_SIZE - 1)
+            y = random.randint(0, MAP_SIZE - 1)
+            if self._is_passable(x, y):
+                return x, y
+        return 0, 0
 
     def reset(self, seed=None, options=None):
         """
@@ -170,191 +125,258 @@ class NormandyEnv(gym.Env):
         if seed is not None:
             random.seed(seed)
             np.random.seed(seed)
-        
-        # 1. Generar nuevo mapa
-        self.map    = self.map_gen.generate_map()
+
+        self.map = self.map_gen.generate_map()
         self.points = {
             name: {
-                "pos":  list(pos),
-                "gas":  POINT_SUPPLY_LIMITS["gas"],
-                "ammo": POINT_SUPPLY_LIMITS["ammo"]
+                'pos':  list(pos),
+                'gas':  POINT_SUPPLY_LIMITS['gas'],
+                'ammo': POINT_SUPPLY_LIMITS['ammo']
             }
-            for name, pos in self.map_gen.get_points().items()
+            for name, pos in FIXED_POINTS.items()
         }
-        
-        # 2. Colocar pelotones azules en posiciones aleatorias libres (esquinas suroeste)
-        self.blue_pelotons = []
-        start_positions = [(2,2), (2,5), (5,2), (5,5)]  # Fijas para simplificar, podrían ser aleatorias
-        for i, (x, y) in enumerate(start_positions):
-            # Asegurar que la celda es transitable
-            while not self.map_gen.is_passable(self.grid, x, y):
-                x = random.randint(0, MAP_SIZE-1)
-                y = random.randint(0, MAP_SIZE-1)
-            pel = create_peloton(x, y, team='blue')
-            pel['id'] = i
-            self.blue_pelotons.append(pel)
-        
-        # 3. Colocar pelotones rojos (hardcodeados, se mueven con reglas simples)
-        self.red_pelotons = []
-        # Generar en posiciones aleatorias del lado noreste
-        for i in range(NUM_RED_PELOTONS):
-            x = random.randint(MAP_SIZE-10, MAP_SIZE-1)
-            y = random.randint(0, MAP_SIZE-1)
-            while not self.map_gen.is_passable(self.grid, x, y):
-                x = random.randint(MAP_SIZE-10, MAP_SIZE-1)
-                y = random.randint(0, MAP_SIZE-1)
-            red = create_peloton(x, y, team='red')
-            red['id'] = i
-            self.red_pelotons.append(red)
-        
-        # 4. Reiniciar estado de captura
-        self.captured_points = {'A': False, 'B': False, 'C': False}
+        self.captured   = {'A': False, 'B': False, 'C': False}
         self.step_count = 0
-        self.done = False
-        
-        # 5. Obtener observación inicial
-        obs = self._get_obs()
-        info = self._get_info()
-        
-        return obs, info
-    
-    def step(self, actions):
-        """
-        Ejecuta un paso del entorno.
-        actions: lista de 4 enteros (0..7) para cada pelotón azul.
-        Retorna: (obs, rewards, terminated, truncated, info)
-        """
+
+        # blues spawn bottom-left (south-west), reds top-right (north-east)
+        self.blue_pelotons = []
+        for i in range(NUM_BLUE):
+            x, y = self._find_free_cell(0, 6, 18, 24)
+            self.blue_pelotons.append(self._make_peloton(x, y, 'blue', i))
+
+        # reds are 3:1 in numbers but weaker per peloton (300hp, 3 tanks)
+        self.red_pelotons = []
+        for i in range(NUM_RED):
+            x, y = self._find_free_cell(18, 24, 0, 6)
+            self.red_pelotons.append(self._make_peloton(x, y, 'red', i, hp=300, num_tanks=3))
+
+        for ca in self.capture_agents:
+            ca.reset_position_history()
+
+        return self._get_obs(), self._get_info()
+
+    def step(self, commander_actions):
         self.step_count += 1
-        rewards = [0.0] * NUM_BLUE_PELOTONS  # Recompensa individual por agente
-        
-        # 1. Aplicar acciones de los pelotones azules (en orden)
-        for idx, action in enumerate(actions):
-            peloton = self.blue_pelotons[idx]
-            reward = self._apply_action(peloton, action, idx)
-            rewards[idx] += reward
-        
-        # 2. Movimiento y ataques de los enemigos rojos (hardcodeado)
-        self._red_turn()
-        
-        # 3. Verificar captura de puntos (si un pelotón azul está sobre un punto)
-        for pel in self.blue_pelotons:
+        rewards = [0.0] * NUM_BLUE
+
+        # snapshot state for each agent before anything happens
+        pre = self._snapshot_states()
+
+        # blue pelotons act
+        atk_actions_taken = [None] * NUM_BLUE
+        def_actions_taken = [None] * NUM_BLUE
+        hit_confirmed     = [False] * NUM_BLUE
+
+        for i, pel in enumerate(self.blue_pelotons):
+            if pre[i] is None:
+                continue
+
+            ps = pre[i]
+
+            # --- attack agent: decides every step, shoots if enemies in range ---
+            atk_a = self.attack_agents[i].choose_action(ps['atk_state'])
+            atk_actions_taken[i] = atk_a
+
+            if atk_a == SHOOT and len(ps['enemies_in_range']) > 0:
+                target = min(ps['enemies_in_range'],
+                             key=lambda e: distance(pel['pos'], e['pos']))
+                # re-check distance in case peloton moved since snapshot
+                if distance(pel['pos'], target['pos']) <= ATTACK_RANGE:
+                    old_tanks    = target['num_tanks']
+                    target_cover = self.map[target['pos'][1]][target['pos'][0]]['cover']
+                    dmg = do_attack(pel, target, target_cover)
+                    if dmg > 0:
+                        hit_confirmed[i] = True
+                        rewards[i] += dmg * 0.1
+                    if old_tanks > 0 and target['num_tanks'] <= 0:
+                        rewards[i] += R_DESTROY_ENEMY
+
+            # --- defense agent: decides every step, moves to cover if needed ---
+            def_a = self.defense_agents[i].choose_action(ps['enemy_nearby'], ps['cover_type'])
+            def_actions_taken[i] = def_a
+
+            moved_to_cover = False
+            if def_a == TAKE_COVER:
+                cover_cell = get_best_cover_cell(pel, self.map, MAP_SIZE)
+                if cover_cell is not None:
+                    move_cost = self.map[cover_cell[1]][cover_cell[0]].get('penalization', 0) + 1
+                    if pel['fuel'] >= move_cost:
+                        pel['pos']   = list(cover_cell)
+                        pel['fuel'] -= move_cost
+                        moved_to_cover = True
+
+            # --- commander action: handles movement / resupply / hold ---
+            # attack and cover are already handled above by sub-agents
+            if not moved_to_cover:
+                self._apply_commander_move(pel, commander_actions[i], i, rewards)
+
+            # check if the peloton is now standing on a capture point
             for point_name, point_data in self.points.items():
-                if (pel['x'] == point_data['x'] and pel['y'] == point_data['y'] 
-                    and not self.captured_points[point_name]):
-                    self.captured_points[point_name] = True
-                    # Recompensa por captura
-                    if point_name == 'B':
-                        reward_val = REWARD_CAPTURE_B
-                    else:
-                        reward_val = REWARD_CAPTURE_POINT
-                    # Asignar recompensa al agente que capturó
-                    idx = pel['id']
-                    rewards[idx] += reward_val
-        
-        # 4. Aplicar penalización por pérdida de tanques (detectar cambio en num_tanks)
-        for pel in self.blue_pelotons:
-            # Se podría guardar el número anterior en un atributo, pero simplificamos
-            pass  # En una implementación completa, se compararía con el estado previo.
-        
-        # 5. Recompensa negativa por paso (para fomentar rapidez)
-        for i in range(NUM_BLUE_PELOTONS):
-            rewards[i] += STEP_PENALTY
-        
-        # 6. Comprobar terminación
+                if pel['pos'] == point_data['pos'] and not self.captured[point_name]:
+                    self.captured[point_name] = True
+                    rewards[i] += R_CAPTURE_B if point_name == 'B' else R_CAPTURE_A_C
+
+        # snapshot blue hp after all blue actions (before red attacks)
+        blue_hp_before_red = [p['hp'] for p in self.blue_pelotons]
+
+        # red team moves and attacks (hardcoded behaviour)
+        self._red_turn()
+
+        # --- all sub-agents learn from what happened this step ---
+        for i, pel in enumerate(self.blue_pelotons):
+            if pre[i] is None:
+                continue
+
+            ps = pre[i]
+            got_hit = pel['hp'] < blue_hp_before_red[i]
+
+            # attack agent: see if there are still enemies in range after red turn
+            new_in_range   = get_enemies_in_range(pel, self.red_pelotons, ATTACK_RANGE)
+            next_atk_state = self.attack_agents[i].get_state(new_in_range)
+            atk_reward     = self.attack_agents[i].compute_reward(
+                ps['atk_state'], atk_actions_taken[i], hit_confirmed[i]
+            )
+            self.attack_agents[i].update(ps['atk_state'], atk_actions_taken[i], atk_reward, next_atk_state)
+
+            # defense agent: check new threat / cover situation after red turn
+            nearest_now, dist_now = get_nearest_enemy(pel, self.red_pelotons)
+            next_enemy_nearby = 1 if (nearest_now is not None and dist_now <= 4) else 0
+            next_cover_val    = self.map[pel['pos'][1]][pel['pos'][0]]['cover']
+            next_cover_type   = get_cover_type_int(next_cover_val)
+            def_reward = self.defense_agents[i].compute_reward(
+                ps['enemy_nearby'], ps['cover_type'], def_actions_taken[i], got_hit
+            )
+            self.defense_agents[i].update(
+                ps['enemy_nearby'], ps['cover_type'],
+                def_actions_taken[i], def_reward,
+                next_enemy_nearby, next_cover_type
+            )
+
+            # capture agent: reward based on whether we got closer to an uncaptured point
+            nearest_obj = self._nearest_uncaptured_point(pel)
+            if nearest_obj is not None:
+                old_pos_t = tuple(ps['pos'])
+                new_pos_t = tuple(pel['pos'])
+                obj_pos_t = tuple(nearest_obj['pos'])
+                inferred_move = self._infer_move_action(list(old_pos_t), list(new_pos_t))
+                cap_reward = self.capture_agents[i].compute_reward(old_pos_t, new_pos_t, obj_pos_t)
+                self.capture_agents[i].update(old_pos_t, obj_pos_t, inferred_move, cap_reward, new_pos_t)
+                self.capture_agents[i].update_position_history(new_pos_t)
+
+        # small penalty every step to encourage speed
+        for i in range(NUM_BLUE):
+            rewards[i] += P_STEP
+
+        # check win / loss conditions
         terminated = False
-        # Victoria: capturar los tres puntos
-        if all(self.captured_points.values()):
+        if all(self.captured.values()):
             terminated = True
-            for i in range(NUM_BLUE_PELOTONS):
-                rewards[i] += REWARD_WIN
-        # Derrota: todos los pelotones azules destruidos
-        if all(p['num_tanks'] == 0 for p in self.blue_pelotons):
+            for i in range(NUM_BLUE):
+                rewards[i] += R_WIN
+
+        if all_dead(self.blue_pelotons):
             terminated = True
-            for i in range(NUM_BLUE_PELOTONS):
-                rewards[i] += PENALTY_LOSE
-        # Límite de pasos
-        truncated = self.step_count >= self.max_steps
-        
-        # 7. Obtener observaciones e info
-        obs = self._get_obs()
-        info = self._get_info()
-        self.done = terminated or truncated
-        
-        # 8. Renderizar si es necesario
+            for i in range(NUM_BLUE):
+                rewards[i] += P_LOSE
+
+        truncated = self.step_count >= MAX_STEPS
+
+        # decay epsilon at the end of every episode
+        if terminated or truncated:
+            for i in range(NUM_BLUE):
+                self.attack_agents[i].decay_epsilon()
+                self.defense_agents[i].decay_epsilon()
+                self.capture_agents[i].decay_epsilon()
+
         if self.render_mode == "human":
             self._render()
-        
-        # Gymnasium espera una única recompensa (suma) si es un solo agente.
-        # Como tenemos multi-agente, devolvemos una lista. Esto no es estándar, pero
-        # para adaptarnos a la práctica, retornamos (obs, rewards, terminated, truncated, info)
-        # donde rewards es una lista.
-        return obs, rewards, terminated, truncated, info
-    
-    def _apply_action(self, peloton, action, agent_id):
-        """
-        Aplica una acción a un pelotón y devuelve la recompensa inmediata.
-        """
-        reward = 0
-        
-        if action == ACTION_MOVE_NORTH:
-            move_peloton(peloton, 0, self.grid)
-        elif action == ACTION_MOVE_SOUTH:
-            move_peloton(peloton, 1, self.grid)
-        elif action == ACTION_MOVE_EAST:
-            move_peloton(peloton, 2, self.grid)
-        elif action == ACTION_MOVE_WEST:
-            move_peloton(peloton, 3, self.grid)
-        elif action == ACTION_ATTACK:
-            # Atacar al enemigo más cercano en rango
-            nearest_enemy = self._get_nearest_enemy(peloton)
-            if nearest_enemy:
-                distance = abs(peloton['x'] - nearest_enemy['x']) + abs(peloton['y'] - nearest_enemy['y'])
-                cover = self.grid[nearest_enemy['y']][nearest_enemy['x']]['cover']
-                damage = apply_combat(peloton, nearest_enemy, distance, cover)
-                if damage > 0:
-                    reward += damage * REWARD_DAMAGE_ENEMY
-                    # Si el enemigo muere, recompensa extra?
-                    if nearest_enemy['num_tanks'] == 0:
-                        reward += 100  # Bonus por destruir un pelotón enemigo
-                # Actualizar estado del atacante (munición ya se gastó en apply_combat)
-                update_peloton_state(peloton)
-        elif action == ACTION_TAKE_COVER:
-            success = take_cover(peloton, self.grid)
-            if not success:
-                reward -= 1  # Pequeña penalización si no puede cubrirse
-        elif action == ACTION_RESUPPLY:
-            # Buscar si está en un punto no capturado (o incluso capturado pero con suministros)
-            for point_name, point_data in self.points.items():
-                if peloton['x'] == point_data['x'] and peloton['y'] == point_data['y']:
-                    if point_data['gas'] > 0 or point_data['ammo'] > 0:
-                        resupply(peloton, point_data)
-                        reward += REWARD_SUPPLY
-                    break
-        elif action == ACTION_HOLD:
-            # No hacer nada, solo esperar
-            pass
-        
-        # Después de cualquier acción que no sea ataque, también se actualiza el estado
-        # (por si el movimiento provocó caída de tanques? No, solo combate cambia HP)
-        # Pero si el pelotón se queda sin gas, etc., no afecta HP.
-        return reward
-    
-    def _get_nearest_enemy(self, peloton):
-        """
-        Devuelve el pelotón enemigo más cercano (distancia Manhattan).
-        """
-        enemies = self.red_pelotons
-        min_dist = float('inf')
-        nearest = None
-        for enemy in enemies:
-            if enemy['num_tanks'] <= 0:
+
+        return self._get_obs(), rewards, terminated, truncated, self._get_info()
+
+    # -------------------------------------------------------------------------
+    # helpers used inside step()
+    # -------------------------------------------------------------------------
+
+    def _snapshot_states(self):
+        pre = []
+        for i, pel in enumerate(self.blue_pelotons):
+            if pel['num_tanks'] <= 0:
+                pre.append(None)
                 continue
-            dist = abs(peloton['x'] - enemy['x']) + abs(peloton['y'] - enemy['y'])
-            if dist < min_dist:
-                min_dist = dist
-                nearest = enemy
-        return nearest
-    
+
+            enemies_in_range = get_enemies_in_range(pel, self.red_pelotons, ATTACK_RANGE)
+            atk_state = self.attack_agents[i].get_state(enemies_in_range)
+
+            nearest_enemy, nearest_dist = get_nearest_enemy(pel, self.red_pelotons)
+            enemy_nearby = 1 if (nearest_enemy is not None and nearest_dist <= 4) else 0
+            cover_val    = self.map[pel['pos'][1]][pel['pos'][0]]['cover']
+            cover_type   = get_cover_type_int(cover_val)
+
+            pre.append({
+                'hp':               pel['hp'],
+                'pos':              list(pel['pos']),
+                'atk_state':        atk_state,
+                'enemy_nearby':     enemy_nearby,
+                'cover_type':       cover_type,
+                'enemies_in_range': enemies_in_range,
+            })
+        return pre
+
+    def _apply_commander_move(self, pel, action, agent_id, rewards):
+        dx, dy = 0, 0
+
+        if action == ACTION_MOVE_NORTH:
+            dy = -1
+        elif action == ACTION_MOVE_SOUTH:
+            dy = 1
+        elif action == ACTION_MOVE_EAST:
+            dx = 1
+        elif action == ACTION_MOVE_WEST:
+            dx = -1
+        elif action == ACTION_RESUPPLY:
+            for point_data in self.points.values():
+                if pel['pos'] == point_data['pos']:
+                    if do_resupply(pel, point_data):
+                        rewards[agent_id] += R_RESUPPLY
+                    break
+            return
+        else:
+            return  # HOLD, ATTACK (handled by sub-agent), TAKE_COVER (handled by sub-agent)
+
+        new_x = pel['pos'][0] + dx
+        new_y = pel['pos'][1] + dy
+
+        if self._is_passable(new_x, new_y):
+            terrain   = self.map[new_y][new_x]
+            move_cost = terrain.get('penalization', 0) + 1
+            if pel['fuel'] >= move_cost:
+                pel['pos']   = [new_x, new_y]
+                pel['fuel'] -= move_cost
+
+    def _nearest_uncaptured_point(self, pel):
+        best      = None
+        best_dist = 99999
+        for name, pd in self.points.items():
+            if not self.captured[name]:
+                d = distance(pel['pos'], pd['pos'])
+                if d < best_dist:
+                    best_dist = d
+                    best = pd
+        return best
+
+    def _infer_move_action(self, old_pos, new_pos):
+        dx = new_pos[0] - old_pos[0]
+        dy = new_pos[1] - old_pos[1]
+        if dy < 0:
+            return MOVE_UP
+        elif dy > 0:
+            return MOVE_DOWN
+        elif dx > 0:
+            return MOVE_RIGHT
+        elif dx < 0:
+            return MOVE_LEFT
+        return STAY
+
     def _red_turn(self):
         """
         Lógica hardcodeada para los rojos:
@@ -362,99 +384,97 @@ class NormandyEnv(gym.Env):
         - Si no, se mueven hacia el azul más cercano (movimiento simple).
         """
         for red in self.red_pelotons:
-            if red['num_tanks'] == 0:
+            if red['num_tanks'] <= 0:
                 continue
             # Encontrar azul más cercano
             nearest_blue = None
-            min_dist = float('inf')
+            min_dist     = 99999
             for blue in self.blue_pelotons:
-                if blue['num_tanks'] == 0:
+                if blue['num_tanks'] <= 0:
                     continue
-                dist = abs(red['x'] - blue['x']) + abs(red['y'] - blue['y'])
-                if dist < min_dist:
-                    min_dist = dist
+                d = distance(red['pos'], blue['pos'])
+                if d < min_dist:
+                    min_dist     = d
                     nearest_blue = blue
+
             if nearest_blue is None:
                 continue
-            
-            # Atacar si está a rango
-            if min_dist <= 5 and can_attack(red, nearest_blue, max_range=5):
-                cover = self.grid[nearest_blue['y']][nearest_blue['x']]['cover']
-                damage = apply_combat(red, nearest_blue, min_dist, cover)
-                # Actualizar estado del azul (posible pérdida de tanques)
-                update_peloton_state(nearest_blue)
+
+            if min_dist <= ATTACK_RANGE:
+                target_cover = self.map[nearest_blue['pos'][1]][nearest_blue['pos'][0]]['cover']
+                do_attack(red, nearest_blue, target_cover)
             else:
-                # Moverse hacia el azul (dirección simple)
-                dx = nearest_blue['x'] - red['x']
-                dy = nearest_blue['y'] - red['y']
-                if abs(dx) > abs(dy):
-                    if dx > 0:
-                        move_peloton(red, ACTION_MOVE_EAST, self.grid)
-                    else:
-                        move_peloton(red, ACTION_MOVE_WEST, self.grid)
+                # move one step toward nearest blue
+                dx = nearest_blue['pos'][0] - red['pos'][0]
+                dy = nearest_blue['pos'][1] - red['pos'][1]
+
+                if abs(dx) >= abs(dy):
+                    step_x = 1 if dx > 0 else -1
+                    new_x, new_y = red['pos'][0] + step_x, red['pos'][1]
                 else:
-                    if dy > 0:
-                        move_peloton(red, ACTION_MOVE_SOUTH, self.grid)
-                    else:
-                        move_peloton(red, ACTION_MOVE_NORTH, self.grid)
-    
+                    step_y = 1 if dy > 0 else -1
+                    new_x, new_y = red['pos'][0], red['pos'][1] + step_y
+
+                if self._is_passable(new_x, new_y) and red['fuel'] > 0:
+                    red['pos']   = [new_x, new_y]
+                    red['fuel'] -= 1
+
+    # -------------------------------------------------------------------------
+    # observation, info, render
+    # -------------------------------------------------------------------------
+
     def _get_obs(self):
-        """
-        Construye la observación para cada agente azul.
-        Cada observación es un diccionario con:
-          - 'grid': ventana local de 11x11x5 canales (codificación one-hot del terreno, más cobertura)
-          - 'status': vector normalizado [hp_ratio, gas_ratio, ammo_ratio, num_tanks_ratio, point_A_captured, point_B_captured, point_C_captured]
-        """
         obs_list = []
         for pel in self.blue_pelotons:
-            # Ventana centrada en el pelotón
-            px, py = pel['x'], pel['y']
-            grid_window = np.zeros(OBSERVATION_SHAPE, dtype=np.float32)
-            # Recorrer ventana de radio OBSERVATION_RADIUS
-            for dy in range(-OBSERVATION_RADIUS, OBSERVATION_RADIUS+1):
-                for dx in range(-OBSERVATION_RADIUS, OBSERVATION_RADIUS+1):
-                    wx = px + dx
-                    wy = py + dy
-                    if 0 <= wx < MAP_SIZE and 0 <= wy < MAP_SIZE:
-                        cell = self.grid[wy][wx]
-                        # Canal 0: tipo de terreno codificado como entero (0..5)
-                        # Para simplificar, usamos un índice numérico
-                        terrain_idx = list(TERRAIN_TYPES.keys()).index(cell['type'])
-                        grid_window[dy+OBSERVATION_RADIUS, dx+OBSERVATION_RADIUS, 0] = terrain_idx / 5.0
-                        # Canal 1: cobertura
-                        grid_window[dy+OBSERVATION_RADIUS, dx+OBSERVATION_RADIUS, 1] = cell['cover']
-                        # Canal 2: si hay enemigo rojo
-                        enemy_present = 0
-                        for red in self.red_pelotons:
-                            if red['x'] == wx and red['y'] == wy and red['num_tanks'] > 0:
-                                enemy_present = 1
-                                break
-                        grid_window[dy+OBSERVATION_RADIUS, dx+OBSERVATION_RADIUS, 2] = enemy_present
-                        # Canal 3: si hay punto de interés (A/B/C) no capturado
-                        point_present = 0
-                        for pname, pdata in self.points.items():
-                            if pdata['x'] == wx and pdata['y'] == wy and not self.captured_points[pname]:
-                                point_present = 1
-                                break
-                        grid_window[dy+OBSERVATION_RADIUS, dx+OBSERVATION_RADIUS, 3] = point_present
-                        # Canal 4: cobertura especial (podría ser otro factor)
-                        grid_window[dy+OBSERVATION_RADIUS, dx+OBSERVATION_RADIUS, 4] = 0.0  # reservado
-                    else:
-                        # Fuera del mapa: rellenar con 0
-                        pass
-            
-            # Estado interno del pelotón (normalizado)
-            hp_ratio = pel['hp'] / PELOTON_MAX_HP
-            gas_ratio = pel['gas'] / MAX_GAS
-            ammo_ratio = pel['ammo'] / MAX_AMMO
-            tanks_ratio = pel['num_tanks'] / TANKS_PER_PELOTON
-            point_captured = [1.0 if self.captured_points[p] else 0.0 for p in ['A','B','C']]
-            status = np.array([hp_ratio, gas_ratio, ammo_ratio, tanks_ratio] + point_captured, dtype=np.float32)
-            
-            obs_list.append({'grid': grid_window, 'status': status})
-        
-        return tuple(obs_list)  # Tuple para spaces.Tuple
-    
+            if pel['num_tanks'] <= 0:
+                obs_list.append(np.zeros(OBS_SIZE, dtype=np.float32))
+                continue
+
+            nearest_enemy, enemy_dist = get_nearest_enemy(pel, self.red_pelotons)
+            if nearest_enemy is None:
+                enemy_nearby       = 0
+                enemy_dist_clamped = 9
+            else:
+                enemy_nearby       = 1 if enemy_dist <= 4 else 0
+                enemy_dist_clamped = min(enemy_dist, 9)
+
+            nearest_obj = self._nearest_uncaptured_point(pel)
+            if nearest_obj is not None:
+                obj_dx     = nearest_obj['pos'][0] - pel['pos'][0]
+                obj_dy     = nearest_obj['pos'][1] - pel['pos'][1]
+                obj_dx_dir = 0 if obj_dx == 0 else (1 if obj_dx > 0 else 2)
+                obj_dy_dir = 0 if obj_dy == 0 else (1 if obj_dy > 0 else 2)
+                obj_dist   = min(abs(obj_dx) + abs(obj_dy), 9)
+            else:
+                obj_dx_dir = 0
+                obj_dy_dir = 0
+                obj_dist   = 0
+
+            cover_type = get_cover_type_int(self.map[pel['pos'][1]][pel['pos'][0]]['cover'])
+
+            obs = np.array([
+                pel['hp'] // 100,                # 0-5  hp in hundreds
+                pel['fuel'] // 20,               # 0-5  fuel level
+                pel['ammo'] // 20,               # 0-5  ammo level
+                pel['num_tanks'],                # 0-5  tanks remaining
+                cover_type,                      # 0-2  current cell cover
+                enemy_nearby,                    # 0-1  enemy within 4 cells
+                enemy_dist_clamped,              # 0-9  distance to nearest enemy
+                1 if self.captured['A'] else 0,  # 0-1
+                1 if self.captured['B'] else 0,  # 0-1
+                1 if self.captured['C'] else 0,  # 0-1
+                obj_dx_dir,                      # 0-2  direction to nearest objective (x)
+                obj_dy_dir,                      # 0-2  direction to nearest objective (y)
+                obj_dist,                        # 0-9  distance to nearest objective
+                pel['pos'][0] // 5,              # 0-4  map sector x
+                pel['pos'][1] // 5,              # 0-4  map sector y
+                1 if pel['ammo'] < 20 else 0,    # 0-1  low ammo flag
+            ], dtype=np.float32)
+
+            obs_list.append(obs)
+
+        return tuple(obs_list)
+
     def _get_info(self):
         """
         Información adicional para depuración.
@@ -463,7 +483,7 @@ class NormandyEnv(gym.Env):
             'step': self.step_count,
             'blue_alive': sum(1 for p in self.blue_pelotons if p['num_tanks'] > 0),
             'red_alive': sum(1 for p in self.red_pelotons if p['num_tanks'] > 0),
-            'captured': self.captured_points.copy()
+            'captured': self.captured.copy()
         }
     
     def _render(self):
@@ -475,67 +495,60 @@ class NormandyEnv(gym.Env):
         try:
             import pygame
         except ImportError:
-            print("Pygame no instalado. No se puede renderizar.")
+            print("pygame not installed, cannot render")
             return
         
         if self.window is None:
             pygame.init()
-            self.window = pygame.display.set_mode((800, 800))
+            self.window = pygame.display.set_mode((750, 750))
+            pygame.display.set_caption("Normandy RL")
             self.clock = pygame.time.Clock()
-        
-        # Limpiar pantalla
-        self.window.fill((0,0,0))
-        cell_size = 800 // MAP_SIZE
-        
-        # Dibujar mapa (colores según tipo)
-        for y in range(MAP_SIZE):
-            for x in range(MAP_SIZE):
-                rect = pygame.Rect(x*cell_size, y*cell_size, cell_size, cell_size)
-                cell = self.grid[y][x]
-                if cell['type'] == 'OPEN':
-                    color = (100,200,100)
-                elif cell['type'] == 'BUSH':
-                    color = (50,150,50)
-                elif cell['type'] == 'FOREST':
-                    color = (20,100,20)
-                elif cell['type'] == 'RUBBLE':
-                    color = (100,100,100)
-                elif cell['type'] == 'WALL':
-                    color = (80,80,80)
-                elif cell['type'] == 'WATER':
-                    color = (50,100,200)
-                else:
-                    color = (200,200,200)
+
+        cell_size = 750 // MAP_SIZE
+        self.window.fill((0, 0, 0))
+
+        terrain_colors = {
+            'OPEN':   (100, 200, 100),
+            'BUSH':   (50,  150,  50),
+            'FOREST': (20,  100,  20),
+            'RUBBLE': (120, 120, 120),
+            'WALL':   (80,   80,  80),
+            'WATER':  (50,  100, 200),
+        }
+
+        for row in range(MAP_SIZE):
+            for col in range(MAP_SIZE):
+                cell  = self.map[row][col]
+                color = terrain_colors.get(cell['type'], (200, 200, 200))
+                rect  = pygame.Rect(col * cell_size, row * cell_size, cell_size, cell_size)
                 pygame.draw.rect(self.window, color, rect)
                 pygame.draw.rect(self.window, (0,0,0), rect, 1)
         
         # Dibujar puntos A,B,C
         for name, p in self.points.items():
-            if not self.captured_points[name]:
-                cx = p['x']*cell_size + cell_size//2
-                cy = p['y']*cell_size + cell_size//2
-                pygame.draw.circle(self.window, (255,255,0), (cx,cy), cell_size//3)
-        
-        # Dibujar pelotones azules (cuadrados azules)
+            if not self.captured[name]:
+                cx = p['pos'][0] * cell_size + cell_size // 2
+                cy = p['pos'][1] * cell_size + cell_size // 2
+                pygame.draw.circle(self.window, (255, 255, 0), (cx, cy), cell_size // 3)
+
+        font = pygame.font.Font(None, 18)
         for pel in self.blue_pelotons:
             if pel['num_tanks'] > 0:
-                rect = pygame.Rect(pel['x']*cell_size, pel['y']*cell_size, cell_size, cell_size)
-                pygame.draw.rect(self.window, (0,0,255), rect)
-                # Mostrar número de tanques
-                font = pygame.font.Font(None, 20)
-                text = font.render(str(pel['num_tanks']), True, (255,255,255))
-                self.window.blit(text, (pel['x']*cell_size, pel['y']*cell_size))
-        
-        # Dibujar rojos (cuadrados rojos)
+                rect = pygame.Rect(pel['pos'][0] * cell_size, pel['pos'][1] * cell_size, cell_size, cell_size)
+                pygame.draw.rect(self.window, (30, 80, 220), rect)
+                txt = font.render(str(pel['num_tanks']), True, (255, 255, 255))
+                self.window.blit(txt, (pel['pos'][0] * cell_size + 2, pel['pos'][1] * cell_size + 2))
+
         for pel in self.red_pelotons:
             if pel['num_tanks'] > 0:
-                rect = pygame.Rect(pel['x']*cell_size, pel['y']*cell_size, cell_size, cell_size)
-                pygame.draw.rect(self.window, (255,0,0), rect)
-        
+                rect = pygame.Rect(pel['pos'][0] * cell_size, pel['pos'][1] * cell_size, cell_size, cell_size)
+                pygame.draw.rect(self.window, (200, 30, 30), rect)
+
         pygame.display.flip()
         self.clock.tick(self.metadata["render_fps"])
     
     def close(self):
         if self.window is not None:
+            import pygame
             pygame.quit()
             self.window = None
