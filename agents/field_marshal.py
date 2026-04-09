@@ -25,16 +25,16 @@ class field_marshal:
 
     def choose_action(self, blue_platoons, red_platoons, objectives, observations):
         """
-        blue_platoons: lista de pelotones azules
-        red_platoons: lista de pelotones rojos
-        objectives: diccionario con estado de A, B y C
-                    ejemplo:
+        blue_platoons: blue platoons list
+        red_platoons: red platoons list
+        objectives: dictionary with state of A, B and C
+                    example:
                     {
                         "A": {"captured": False},
                         "B": {"captured": False},
                         "C": {"captured": False}
                     }
-        observations: lista de observaciones de los pelotones azules
+        observations: Blue platoon observation list
         """
 
         blue_alive = self.count_alive(blue_platoons)
