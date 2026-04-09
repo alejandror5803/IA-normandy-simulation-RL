@@ -37,23 +37,26 @@ class defense_agent:
             return random.randint(0, 1)
         return int(np.argmax(self.q_table[state]))
 
-    def compute_reward(self, enemy_nearby, cover_type, action, got_hit):
+    def compute_reward(self, enemy_nearby, cover_type, action, got_hit, next_cover_type=0):
         reward = 0.0
 
         if enemy_nearby:
             if action == TAKE_COVER:
-                # more reward for better cover
-                reward += 0.5 + COVER_BONUS[cover_type]
+                if next_cover_type > cover_type:
+                    reward += 1.0   # actually moved to better cover — good
+                elif cover_type > 0:
+                    reward += 0.1   # already in cover and staying — acceptable but not great
+                else:
+                    reward -= 0.5   # tried to get cover but no better cell adjacent
             else:
-                reward -= 1.0  # enemy nearby and exposed, bad
+                if cover_type == 0:
+                    reward -= 1.0   # enemy nearby, in the open, not even trying to cover
 
         if got_hit:
-            if action == TAKE_COVER:
-                # got hit but was covered, partial mitigation
-                reward += 0.3 * COVER_BONUS.get(cover_type, 0)
+            if cover_type > 0:
+                reward += 0.3 * COVER_BONUS[cover_type]   # cover absorbed some damage
             else:
-                # got hit in the open, really bad
-                reward -= 2.5
+                reward -= 2.5   # took damage fully in the open
 
         return reward
 
