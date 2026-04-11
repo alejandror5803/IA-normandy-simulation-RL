@@ -13,7 +13,7 @@ from env.map_generator import MapGenerator, FIXED_POINTS, POINT_SUPPLY_LIMITS, I
 from env.combat_logic import (
     get_enemies_in_range, get_nearest_enemy, do_attack,
     get_best_cover_cell, get_cover_type_int, do_resupply,
-    all_dead, ATTACK_RANGE
+    all_dead, ATTACK_RANGE, TIGER_DAMAGE
 )
 from env.units import distance
 
@@ -52,10 +52,11 @@ class NormandyEnv(gym.Env):
 
     metadata = {"render_modes": ["human"], "render_fps": 4}
 
-    def __init__(self, render_mode=None, seed=42):
+    def __init__(self, render_mode=None, seed=42, render_every=1000):
         super().__init__()
 
-        self.render_mode = render_mode
+        self.render_mode   = render_mode
+        self.render_every  = render_every   # render once every N episodes (0 = every step)
         self.map_gen = MapGenerator(size=MAP_SIZE, seed=seed)
         # generate the map ONCE and reuse it — the terrain stays the same every episode
         # so that Q-tables can actually converge to a stable navigation policy
@@ -69,7 +70,7 @@ class NormandyEnv(gym.Env):
             spaces.Box(low=0.0, high=9.0, shape=(OBS_SIZE,), dtype=np.float32)
             for _ in range(NUM_BLUE)
         ])
-
+        self.episode = 0
         # one set of sub-agents per blue peloton
         self.attack_agents  = [attack_agent()  for _ in range(NUM_BLUE)]
         self.defense_agents = [defense_agent() for _ in range(NUM_BLUE)]
@@ -89,8 +90,11 @@ class NormandyEnv(gym.Env):
         self.captured       = {'A': False, 'B': False, 'C': False}
         self.step_count     = 0
 
-        self.window = None
-        self.clock  = None
+        self.window          = None
+        self.clock           = None
+        self.tiger_img       = None   # cached so we don't reload every step
+        self.sherman_img     = None
+        self.map_bg_surface  = None   # optional background image (mapaNormandia.png)
 
         self.reset()
 
@@ -102,7 +106,7 @@ class NormandyEnv(gym.Env):
             'hp':        hp,
             'num_tanks': num_tanks,
             'ammo':      100,
-            'fuel':      100,
+            'fuel':      500,
         }
 
     def _is_passable(self, x, y):
@@ -148,7 +152,7 @@ class NormandyEnv(gym.Env):
         # same starting positions every episode (set once in __init__)
         self.blue_pelotons = []
         for i, (x, y) in enumerate(self.fixed_blue_starts):
-            self.blue_pelotons.append(self._make_peloton(x, y, 'blue', i))
+            self.blue_pelotons.append(self._make_peloton(x, y, 'blue', i, hp=700, num_tanks=7))
 
         # reds are 3:1 in numbers but weaker per peloton (300hp, 3 tanks)
         self.red_pelotons = []
@@ -202,7 +206,7 @@ class NormandyEnv(gym.Env):
                     if distance(pel['pos'], target['pos']) <= ATTACK_RANGE:
                         old_tanks    = target['num_tanks']
                         target_cover = self.map[target['pos'][1]][target['pos'][0]]['cover']
-                        dmg = do_attack(pel, target, target_cover)
+                        dmg = do_attack(pel, target, target_cover, damage_per_tank=TIGER_DAMAGE)
                         if dmg > 0:
                             hit_confirmed[i] = True
                             rewards[i] += dmg * 0.5   # bigger signal per hit
@@ -279,7 +283,7 @@ class NormandyEnv(gym.Env):
             next_cover_val    = self.map[pel['pos'][1]][pel['pos'][0]]['cover']
             next_cover_type   = get_cover_type_int(next_cover_val)
             def_reward = self.defense_agents[i].compute_reward(
-                ps['enemy_nearby'], ps['cover_type'], def_actions_taken[i], got_hit
+                ps['enemy_nearby'], ps['cover_type'], def_actions_taken[i], got_hit, next_cover_type
             )
             self.defense_agents[i].update(
                 ps['enemy_nearby'], ps['cover_type'],
@@ -475,27 +479,50 @@ class NormandyEnv(gym.Env):
             'red_alive': sum(1 for p in self.red_pelotons if p['num_tanks'] > 0),
             'captured': self.captured.copy()
         }
-    
+
+    def increase_episode(self):
+        self.episode += 1
+
     def _render(self):
         """
         Renderizado simple con pygame (opcional).
         """
         if self.render_mode != "human":
             return
+
+        # skip render unless this episode is a multiple of render_every
+        if self.render_every > 0 and self.episode % self.render_every != 0:
+            return
+
         try:
             import pygame
         except ImportError:
             print("pygame not installed, cannot render")
             return
-        
+
+        cell_size = 750 // MAP_SIZE
+
         if self.window is None:
             pygame.init()
             self.window = pygame.display.set_mode((750, 750))
-            pygame.display.set_caption("Normandy RL")
-            self.clock = pygame.time.Clock()
+            self.clock  = pygame.time.Clock()
+            # try to load map background image (optional)
+            try:
+                bg = pygame.image.load("resources/mapaNormandia.png").convert()
+                self.map_bg_surface = pygame.transform.scale(bg, (750, 750))
+            except Exception:
+                self.map_bg_surface = None
+            # load unit images once — reuse every step instead of re-loading every frame
+            try:
+                self.tiger_img = pygame.transform.scale(
+                    pygame.image.load("resources/tiger.png").convert_alpha(), (cell_size, cell_size))
+                self.sherman_img = pygame.transform.scale(
+                    pygame.image.load("resources/sherman.png").convert_alpha(), (cell_size, cell_size))
+            except Exception:
+                self.tiger_img   = None
+                self.sherman_img = None
 
-        cell_size = 750 // MAP_SIZE
-        self.window.fill((0, 0, 0))
+        pygame.display.set_caption(f"Normandy RL — ep {self.episode}  step {self.step_count}")
 
         terrain_colors = {
             'OPEN':   (100, 200, 100),
@@ -506,33 +533,61 @@ class NormandyEnv(gym.Env):
             'WATER':  (50,  100, 200),
         }
 
+        # background: image if available, black otherwise
+        if self.map_bg_surface:
+            self.window.blit(self.map_bg_surface, (0, 0))
+        else:
+            self.window.fill((0, 0, 0))
+
+        # terrain grid — semi-transparent when background image is present so both are visible
+        terrain_overlay = pygame.Surface((750, 750), pygame.SRCALPHA)
+        cell_alpha = 110 if self.map_bg_surface else 255
         for row in range(MAP_SIZE):
             for col in range(MAP_SIZE):
                 cell  = self.map[row][col]
-                color = terrain_colors.get(cell['type'], (200, 200, 200))
+                r, g, b = terrain_colors.get(cell['type'], (200, 200, 200))
                 rect  = pygame.Rect(col * cell_size, row * cell_size, cell_size, cell_size)
-                pygame.draw.rect(self.window, color, rect)
-                pygame.draw.rect(self.window, (0,0,0), rect, 1)
-        
-        # Dibujar puntos A,B,C
-        for name, p in self.points.items():
-            if not self.captured[name]:
-                cx = p['pos'][0] * cell_size + cell_size // 2
-                cy = p['pos'][1] * cell_size + cell_size // 2
-                pygame.draw.circle(self.window, (255, 255, 0), (cx, cy), cell_size // 3)
+                pygame.draw.rect(terrain_overlay, (r, g, b, cell_alpha), rect)
+                pygame.draw.rect(terrain_overlay, (0, 0, 0, 60), rect, 1)
+        self.window.blit(terrain_overlay, (0, 0))
 
-        font = pygame.font.Font(None, 18)
+        # draw capture points (yellow = free, cyan = captured)
+        font_small = pygame.font.Font(None, 18)
+        for name, p in self.points.items():
+            cx = p['pos'][0] * cell_size + cell_size // 2
+            cy = p['pos'][1] * cell_size + cell_size // 2
+            color = (0, 200, 255) if self.captured[name] else (255, 215, 0)
+            pygame.draw.circle(self.window, color, (cx, cy), cell_size // 3)
+            lbl = font_small.render(name, True, (0, 0, 0))
+            self.window.blit(lbl, (cx - 4, cy - 6))
+
         for pel in self.blue_pelotons:
             if pel['num_tanks'] > 0:
-                rect = pygame.Rect(pel['pos'][0] * cell_size, pel['pos'][1] * cell_size, cell_size, cell_size)
-                pygame.draw.rect(self.window, (30, 80, 220), rect)
-                txt = font.render(str(pel['num_tanks']), True, (255, 255, 255))
-                self.window.blit(txt, (pel['pos'][0] * cell_size + 2, pel['pos'][1] * cell_size + 2))
+                xp = pel['pos'][0] * cell_size
+                yp = pel['pos'][1] * cell_size
+                if self.tiger_img:
+                    self.window.blit(self.tiger_img, (xp, yp))
+                else:
+                    pygame.draw.rect(self.window, (30, 80, 220), pygame.Rect(xp, yp, cell_size, cell_size))
+                txt = font_small.render(str(pel['num_tanks']), True, (255, 255, 255))
+                self.window.blit(txt, (xp + 2, yp + 2))
 
         for pel in self.red_pelotons:
             if pel['num_tanks'] > 0:
-                rect = pygame.Rect(pel['pos'][0] * cell_size, pel['pos'][1] * cell_size, cell_size, cell_size)
-                pygame.draw.rect(self.window, (200, 30, 30), rect)
+                xp = pel['pos'][0] * cell_size
+                yp = pel['pos'][1] * cell_size
+                if self.sherman_img:
+                    self.window.blit(self.sherman_img, (xp, yp))
+                else:
+                    pygame.draw.rect(self.window, (200, 30, 30), pygame.Rect(xp, yp, cell_size, cell_size))
+
+        # episode + step HUD (top-left, dark background so it's always readable)
+        font_hud  = pygame.font.Font(None, 28)
+        hud_text  = f"ep {self.episode}   step {self.step_count}"
+        hud_surf  = font_hud.render(hud_text, True, (255, 255, 255))
+        hud_rect  = pygame.Rect(4, 4, hud_surf.get_width() + 12, 28)
+        pygame.draw.rect(self.window, (0, 0, 0), hud_rect)
+        self.window.blit(hud_surf, (10, 8))
 
         pygame.display.flip()
         self.clock.tick(self.metadata["render_fps"])

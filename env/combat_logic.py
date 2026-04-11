@@ -1,8 +1,10 @@
 from env.units import distance
 from env.map_generator import IMPASSABLE
 
-ATTACK_RANGE = 3
-DAMAGE_PER_ATTACK = 20   # base damage per shot (multiplied by num_tanks alive)
+ATTACK_RANGE    = 3
+TIGER_DAMAGE    = 30   # Tiger tank — historically superior firepower
+SHERMAN_DAMAGE  = 20   # Sherman tank — baseline
+DAMAGE_PER_ATTACK = SHERMAN_DAMAGE  # default kept for red team
 
 
 def get_enemies_in_range(peloton, all_enemies, attack_range=ATTACK_RANGE):
@@ -28,11 +30,11 @@ def get_nearest_enemy(peloton, all_enemies):
     return nearest, min_dist
 
 
-def do_attack(attacker, target, target_cover=0.0):
+def do_attack(attacker, target, target_cover=0.0, damage_per_tank=DAMAGE_PER_ATTACK):
     if attacker['ammo'] <= 0 or attacker['num_tanks'] <= 0:
         return 0
 
-    base_damage = DAMAGE_PER_ATTACK * attacker['num_tanks']
+    base_damage = damage_per_tank * attacker['num_tanks']
     actual_damage = int(base_damage * (1.0 - target_cover))
 
     attacker['ammo'] -= 1
