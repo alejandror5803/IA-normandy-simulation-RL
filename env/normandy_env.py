@@ -6,6 +6,7 @@ Controla 4 pelotones azules, enemigos rojos hardcodeados, puntos, recompensas.
 
 import gymnasium as gym
 from gymnasium import spaces
+# X from gymnasium.wrappers import TimeLimit, ClipAction 
 import numpy as np
 import random
 
@@ -24,7 +25,7 @@ from agents.capture_agent import capture_agent, MOVE_UP, MOVE_DOWN, MOVE_LEFT, M
 NUM_BLUE = 4
 NUM_RED  = 12
 MAP_SIZE = 25
-MAX_STEPS = 500
+MAX_STEPS = 500 # X LO eliminamos porque lo gestiona TimeLimit
 
 # commander meta-actions: the commander decides WHICH sub-agent takes action on the peloton this step
 # movement direction is never chosen by the commander directly — the capture_agent handles that
@@ -61,6 +62,7 @@ class NormandyEnv(gym.Env):
         # so that Q-tables can actually converge to a stable navigation policy
         self.fixed_map = self.map_gen.generate_map()
 
+
         # commander sends one META-action per blue peloton (who controls this step)
         self.action_space = spaces.MultiDiscrete([4] * NUM_BLUE)
 
@@ -76,7 +78,7 @@ class NormandyEnv(gym.Env):
         self.capture_agents = [capture_agent() for _ in range(NUM_BLUE)]
 
         # set map now so _find_free_cell works below
-        self.map = self.fixed_map
+        self.map = self.fixed_map 
 
         # find starting positions ONCE and reuse every episode
         # same terrain + same starts = Q-tables can actually converge
@@ -158,6 +160,7 @@ class NormandyEnv(gym.Env):
         for ca in self.capture_agents:
             ca.reset_position_history()
 
+        # X Cambiar el valor de retorno self._get_obs() por un vector fijo obs
         return self._get_obs(), self._get_info()
 
     def step(self, commander_meta_actions):
@@ -313,7 +316,7 @@ class NormandyEnv(gym.Env):
             for i in range(NUM_BLUE):
                 rewards[i] += P_LOSE
 
-        truncated = self.step_count >= MAX_STEPS
+        truncated = self.step_count >= MAX_STEPS # X eliminamos esto y ponemos truncated = False
 
         if terminated or truncated:
             for i in range(NUM_BLUE):
@@ -325,7 +328,11 @@ class NormandyEnv(gym.Env):
         if self.render_mode == "human":
             self._render()
 
-        return self._get_obs(), rewards, terminated, truncated, self._get_info()
+        # X total_reward = sum (rewards)
+
+        # X obs = self._get_obs()
+
+        return self._get_obs(), rewards, terminated, truncated, self._get_info() # X cambiamos rewards por total_reward
 
     # -------------------------------------------------------------------------
     # helpers used inside step()
@@ -463,7 +470,7 @@ class NormandyEnv(gym.Env):
 
             obs_list.append(obs)
 
-        return tuple(obs_list)
+        return tuple(obs_list) # X en vez de devolver una tupla  ponemos numpy  np.concatenate(all_obs)
 
     def _get_info(self):
         """
@@ -542,3 +549,20 @@ class NormandyEnv(gym.Env):
             import pygame
             pygame.quit()
             self.window = None
+
+    """
+    Función que adaptaría con wrappers: 
+
+    def make_env(render_mode=None, max_steps=500, clip_action=True):
+        env = NormandyEnv(render_mode=render_mode)
+        env = TimeLimit(env, max_episode_steps=max_steps)
+        if clip_action:
+            env = ClipAction(env)
+        return env
+    
+    Crea una instancia del entorno NormandyEnv y le aplica los wrappers:
+    TimeLimit: limita la duración del episodio a `max_steps` pasos.
+    ClipAction: recorta las acciones al rango del action_space .
+    
+    
+    """
