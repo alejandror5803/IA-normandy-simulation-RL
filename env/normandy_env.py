@@ -9,6 +9,7 @@ from gymnasium import spaces
 # X from gymnasium.wrappers import TimeLimit, ClipAction 
 import numpy as np
 import random
+import env.env_config as efg
 
 from env.map_generator import MapGenerator, FIXED_POINTS, POINT_SUPPLY_LIMITS, IMPASSABLE
 from env.combat_logic import (
@@ -22,29 +23,29 @@ from agents.attack_agent  import attack_agent,  SHOOT
 from agents.defense_agent import defense_agent, TAKE_COVER
 from agents.capture_agent import capture_agent, MOVE_UP, MOVE_DOWN, MOVE_LEFT, MOVE_RIGHT, STAY
 
-NUM_BLUE = 4
-NUM_RED  = 12
-MAP_SIZE = 25
-MAX_STEPS = 500 # X LO eliminamos porque lo gestiona TimeLimit
+NUM_BLUE = efg.NUM_BLUE
+NUM_RED  = efg.NUM_RED
+MAP_SIZE = efg.MAP_SIZE
+MAX_STEPS = efg.MAX_STEPS # X LO eliminamos porque lo gestiona TimeLimit
 
 # commander meta-actions: the commander decides WHICH sub-agent takes action on the peloton this step
 # movement direction is never chosen by the commander directly — the capture_agent handles that
-META_CAPTURE  = 0   # capture_agent decides where to move
-META_ATTACK   = 1   # attack_agent decides whether to shoot
-META_DEFENSE  = 2   # defense_agent decides whether to seek cover
-META_RESUPPLY = 3   # directly resupply at the nearest capture point
+META_CAPTURE  = efg.META_CAPTURE   # capture_agent decides where to move
+META_ATTACK   = efg.META_ATTACK   # attack_agent decides whether to shoot
+META_DEFENSE  = efg.META_DEFENSE   # defense_agent decides whether to seek cover
+META_RESUPPLY = efg.META_RESUPPLY   # directly resupply at the nearest capture point
 
 # rewards / penalties
-R_CAPTURE_A_C   = 100
-R_CAPTURE_B     = 200
-R_DESTROY_ENEMY = 200   # higher to make killing enemies worth delegating to attack_agent
-R_RESUPPLY      = 10
-R_WIN           = 1000
-P_LOSE          = -500
-P_STEP          = -0.1
+R_CAPTURE_A_C   = efg.R_CAPTURE_A_C
+R_CAPTURE_B     = efg.R_CAPTURE_B
+R_DESTROY_ENEMY = efg.R_DESTROY_ENEMY   # higher to make killing enemies worth delegating to attack_agent
+R_RESUPPLY      = efg.R_RESUPPLY
+R_WIN           = efg.R_WIN
+P_LOSE          = efg.P_LOSE
+P_STEP          = efg.P_STEP
 
 # observation vector size (one per blue peloton)
-OBS_SIZE = 16
+OBS_SIZE = efg.OBS_SIZE
 # ============================================================================
 # CLASE PRINCIPAL DEL ENTORNO
 # ============================================================================

@@ -1,10 +1,11 @@
+import env.env_config as efg
 from env.units import distance
 from env.map_generator import IMPASSABLE
 
-ATTACK_RANGE    = 3
-TIGER_DAMAGE    = 30   # Tiger tank — historically superior firepower
-SHERMAN_DAMAGE  = 20   # Sherman tank — baseline
-DAMAGE_PER_ATTACK = SHERMAN_DAMAGE  # default kept for red team
+ATTACK_RANGE    = efg.ATTACK_RANGE
+TIGER_DAMAGE    = efg.TIGER_DAMAGE   # Tiger tank — historically superior firepower
+SHERMAN_DAMAGE  = efg.SHERMAN_DAMAGE   # Sherman tank — baseline
+DAMAGE_PER_ATTACK = efg.DAMAGE_PER_ATTACK  # default kept for red team
 
 
 def get_enemies_in_range(peloton, all_enemies, attack_range=ATTACK_RANGE):
