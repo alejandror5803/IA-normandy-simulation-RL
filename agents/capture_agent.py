@@ -1,13 +1,13 @@
 import numpy as np
 import random
-
+import agents.agents_config as cfg
 
 # actions
-MOVE_UP = 0
-MOVE_DOWN = 1
-MOVE_LEFT = 2
-MOVE_RIGHT = 3
-STAY = 4
+MOVE_UP = cfg.MOVE_UP
+MOVE_DOWN = cfg.MOVE_DOWN
+MOVE_LEFT = cfg.MOVE_LEFT
+MOVE_RIGHT = cfg.MOVE_RIGHT
+STAY = cfg.STAY
 
 
 class capture_agent:

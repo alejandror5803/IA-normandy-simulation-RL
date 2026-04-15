@@ -1,18 +1,18 @@
 import numpy as np
 import random
-
+import agents.agents_config as cfg
 
 # cover types (only 3 to test)
-NO_COVER = 0
-BUSH = 1
-WALL = 2
+NO_COVER = cfg.NO_COVER
+BUSH = cfg.BUSH
+WALL = cfg.WALL
 
 # actions
-DONT_COVER = 0
-TAKE_COVER = 1
+DONT_COVER = cfg.DONT_COVER
+TAKE_COVER = cfg.TAKE_COVER
 
 # how much each cover type helps
-COVER_BONUS = {NO_COVER: 0.0, BUSH: 0.5, WALL: 1.0}
+COVER_BONUS = cfg.COVER_BONUS
 
 
 class defense_agent:

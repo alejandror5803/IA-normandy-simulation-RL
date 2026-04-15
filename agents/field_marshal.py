@@ -1,3 +1,6 @@
+## usar LLMs (usando smolagents)
+
+
 CAPTURE_A = 0
 CAPTURE_B = 1
 CAPTURE_C = 2

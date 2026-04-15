@@ -1,10 +1,10 @@
 import numpy as np
 import random
- 
+import agents.agents_config as cfg
  
 # actions
-DONT_SHOOT = 0
-SHOOT = 1
+DONT_SHOOT = cfg.DONT_SHOOT
+SHOOT = cfg.SHOOT
 
 class attack_agent:
  

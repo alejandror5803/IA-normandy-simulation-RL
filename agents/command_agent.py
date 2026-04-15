@@ -1,15 +1,15 @@
 import numpy as np
 import random
-
+import agents.agents_config as cfg
 
 # mirrors the meta-action IDs in normandy_env.py
-META_CAPTURE  = 0
-META_ATTACK   = 1
-META_DEFENSE  = 2
-META_RESUPPLY = 3
+META_CAPTURE  = cfg.META_CAPTURE
+META_ATTACK   = cfg.META_ATTACK
+META_DEFENSE  = cfg.META_DEFENSE
+META_RESUPPLY = cfg.META_RESUPPLY
 
 # same as ATTACK_RANGE in combat_logic.py
-ATTACK_RANGE = 3
+ATTACK_RANGE = cfg.ATTACK_RANGE
 
 
 class command_agent:
