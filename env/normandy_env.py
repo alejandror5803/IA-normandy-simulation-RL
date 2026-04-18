@@ -18,9 +18,10 @@ from env.combat_logic import (
 )
 from env.units import distance
 
-from agents.attack_agent  import attack_agent,  SHOOT
-from agents.defense_agent import defense_agent, TAKE_COVER
-from agents.capture_agent import capture_agent, MOVE_UP, MOVE_DOWN, MOVE_LEFT, MOVE_RIGHT, STAY
+from agents.attack_agent   import attack_agent,  SHOOT
+from agents.defense_agent  import defense_agent, TAKE_COVER
+from agents.capture_agent  import capture_agent, MOVE_UP, MOVE_DOWN, MOVE_LEFT, MOVE_RIGHT, STAY
+from agents.command_agent  import command_agent
 
 NUM_BLUE = efg.NUM_BLUE
 NUM_RED  = efg.NUM_RED
@@ -77,6 +78,13 @@ class NormandyEnv(gym.Env):
         self.attack_agents  = [attack_agent()  for _ in range(NUM_BLUE)]
         self.defense_agents = [defense_agent() for _ in range(NUM_BLUE)]
         self.capture_agents = [capture_agent() for _ in range(NUM_BLUE)]
+
+        # one set of sub-agents per red peloton (same structure as blue)
+        self.red_command_agents = [command_agent() for _ in range(NUM_RED)]
+        self.red_attack_agents  = [attack_agent()  for _ in range(NUM_RED)]
+        self.red_defense_agents = [defense_agent() for _ in range(NUM_RED)]
+        self.red_capture_agents = [capture_agent() for _ in range(NUM_RED)]
+        self.red_captured = {'A': False, 'B': False, 'C': False}
 
         # set map now so _find_free_cell works below
         self.map = self.fixed_map 
@@ -164,14 +172,22 @@ class NormandyEnv(gym.Env):
         for ca in self.capture_agents:
             ca.reset_position_history()
 
+        self.red_captured = {'A': False, 'B': False, 'C': False}
+        for ca in self.red_capture_agents:
+            ca.reset_position_history()
+
         self.obs = self._get_obs()
         return self.obs, self._get_info()
 
     def step(self, commander_meta_actions):
         self.step_count += 1
-        rewards = [0.0] * NUM_BLUE
+        rewards     = [0.0] * NUM_BLUE
+        red_rewards = [0.0] * NUM_RED
 
-        # snapshot state for each agent before anything happens
+        # snapshot red HP now so we can detect which reds got hit by blue this step
+        red_hp_before_blue = [p['hp'] for p in self.red_pelotons]
+
+        # snapshot blue state before anything happens
         pre = self._snapshot_states()
 
         # track what each sub-agent chose (needed for Q-table updates later)
@@ -257,14 +273,100 @@ class NormandyEnv(gym.Env):
             for point_name, point_data in self.points.items():
                 if pel['pos'] == point_data['pos'] and not self.captured[point_name]:
                     self.captured[point_name] = True
+                    if self.red_captured[point_name]:
+                        self.red_captured[point_name] = False  # blue reconquers it from red
                     rewards[i] += R_CAPTURE_B if point_name == 'B' else R_CAPTURE_A_C
 
-        # snapshot hp before red attacks (to detect got_hit later)
+        # snapshot hp before red attacks (to detect got_hit for blue later)
         blue_hp_before_red = [p['hp'] for p in self.blue_pelotons]
 
-        self._red_turn()
+        # snapshot red state before red acts (used for red sub-agent learning)
+        pre_red = self._snapshot_red_states()
 
-        # all sub-agents LEARN from this step — regardless of who was in control
+        # track what each red sub-agent chose
+        red_atk_actions = [None] * NUM_RED
+        red_def_actions = [None] * NUM_RED
+        red_cap_actions = [None] * NUM_RED
+        red_meta_taken  = [None] * NUM_RED
+        red_hit_confirmed = [False] * NUM_RED
+
+        # RED AGENT TURN — mirrors the blue loop above
+        for i, red_pel in enumerate(self.red_pelotons):
+            if pre_red[i] is None:
+                continue
+
+            psr  = pre_red[i]
+            meta = self.red_command_agents[i].choose_action(psr['obs_vec'])
+            red_meta_taken[i] = meta
+
+            atk_a = self.red_attack_agents[i].choose_action(psr['atk_state'])
+            def_a = self.red_defense_agents[i].choose_action(psr['enemy_nearby'], psr['cover_type'])
+
+            nearest_obj_r = self._nearest_uncaptured_point_red(red_pel)
+            if nearest_obj_r is not None:
+                cap_a = self.red_capture_agents[i].choose_action(
+                    tuple(red_pel['pos']), tuple(nearest_obj_r['pos'])
+                )
+            else:
+                cap_a = STAY
+
+            red_atk_actions[i] = atk_a
+            red_def_actions[i] = def_a
+            red_cap_actions[i] = cap_a
+
+            if meta == META_ATTACK:
+                blues_in_range = get_enemies_in_range(red_pel, self.blue_pelotons, ATTACK_RANGE)
+                if atk_a == SHOOT and len(blues_in_range) > 0:
+                    target = min(blues_in_range, key=lambda e: distance(red_pel['pos'], e['pos']))
+                    old_tanks    = target['num_tanks']
+                    target_cover = self.map[target['pos'][1]][target['pos'][0]]['cover']
+                    dmg = do_attack(red_pel, target, target_cover)  # Sherman damage (default)
+                    if dmg > 0:
+                        red_hit_confirmed[i] = True
+                        red_rewards[i] += dmg * 0.5
+                    if old_tanks > 0 and target['num_tanks'] <= 0:
+                        red_rewards[i] += R_DESTROY_ENEMY
+
+            elif meta == META_DEFENSE:
+                if def_a == TAKE_COVER:
+                    cover_cell = get_best_cover_cell(red_pel, self.map, MAP_SIZE)
+                    if cover_cell is not None:
+                        move_cost = self.map[cover_cell[1]][cover_cell[0]].get('penalization', 0) + 1
+                        if red_pel['fuel'] >= move_cost:
+                            red_pel['pos']   = list(cover_cell)
+                            red_pel['fuel'] -= move_cost
+
+            elif meta == META_CAPTURE:
+                dx, dy = 0, 0
+                if cap_a == MOVE_UP:    dy = -1
+                elif cap_a == MOVE_DOWN:  dy =  1
+                elif cap_a == MOVE_RIGHT: dx =  1
+                elif cap_a == MOVE_LEFT:  dx = -1
+
+                new_x = red_pel['pos'][0] + dx
+                new_y = red_pel['pos'][1] + dy
+                if (dx != 0 or dy != 0) and self._is_passable(new_x, new_y):
+                    move_cost = self.map[new_y][new_x].get('penalization', 0) + 1
+                    if red_pel['fuel'] >= move_cost:
+                        red_pel['pos']   = [new_x, new_y]
+                        red_pel['fuel'] -= move_cost
+
+            elif meta == META_RESUPPLY:
+                for point_data in self.points.values():
+                    if red_pel['pos'] == point_data['pos']:
+                        if do_resupply(red_pel, point_data):
+                            red_rewards[i] += R_RESUPPLY
+                        break
+
+            # check if red is standing on a capture point after movement
+            for point_name, point_data in self.points.items():
+                if red_pel['pos'] == point_data['pos'] and not self.red_captured[point_name]:
+                    self.red_captured[point_name] = True
+                    if self.captured[point_name]:
+                        self.captured[point_name] = False  # red reconquers it from blue
+                    red_rewards[i] += R_CAPTURE_B if point_name == 'B' else R_CAPTURE_A_C
+
+        # BLUE SUB-AGENTS LEARN (after red attacked, so got_hit is accurate)
         for i, pel in enumerate(self.blue_pelotons):
             if pre[i] is None:
                 continue
@@ -272,7 +374,6 @@ class NormandyEnv(gym.Env):
             ps      = pre[i]
             got_hit = pel['hp'] < blue_hp_before_red[i]
 
-            # attack agent update
             new_in_range   = get_enemies_in_range(pel, self.red_pelotons, ATTACK_RANGE)
             next_atk_state = self.attack_agents[i].get_state(new_in_range)
             atk_reward     = self.attack_agents[i].compute_reward(
@@ -280,7 +381,6 @@ class NormandyEnv(gym.Env):
             )
             self.attack_agents[i].update(ps['atk_state'], atk_actions_taken[i], atk_reward, next_atk_state)
 
-            # defense agent update
             nearest_now, dist_now = get_nearest_enemy(pel, self.red_pelotons)
             next_enemy_nearby = 1 if (nearest_now is not None and dist_now <= 4) else 0
             next_cover_val    = self.map[pel['pos'][1]][pel['pos'][0]]['cover']
@@ -294,7 +394,6 @@ class NormandyEnv(gym.Env):
                 next_enemy_nearby, next_cover_type
             )
 
-            # capture agent update — uses its chosen action and the actual position outcome
             nearest_obj = self._nearest_uncaptured_point(pel)
             if nearest_obj is not None:
                 old_pos_t = tuple(ps['pos'])
@@ -306,28 +405,100 @@ class NormandyEnv(gym.Env):
                 )
                 self.capture_agents[i].update_position_history(new_pos_t)
 
+        # RED SUB-AGENTS + COMMAND AGENTS LEARN
+        red_obs_after = self._get_red_obs()
+        for i, red_pel in enumerate(self.red_pelotons):
+            if pre_red[i] is None:
+                continue
+
+            psr     = pre_red[i]
+            got_hit_red = red_pel['hp'] < red_hp_before_blue[i]
+
+            new_blues_in_range = get_enemies_in_range(red_pel, self.blue_pelotons, ATTACK_RANGE)
+            next_atk_state_r   = self.red_attack_agents[i].get_state(new_blues_in_range)
+            atk_reward_r       = self.red_attack_agents[i].compute_reward(
+                psr['atk_state'], red_atk_actions[i], red_hit_confirmed[i]
+            )
+            self.red_attack_agents[i].update(psr['atk_state'], red_atk_actions[i], atk_reward_r, next_atk_state_r)
+
+            nearest_blue_now, dist_blue_now = get_nearest_enemy(red_pel, self.blue_pelotons)
+            next_enemy_nearby_r = 1 if (nearest_blue_now is not None and dist_blue_now <= 4) else 0
+            next_cover_val_r    = self.map[red_pel['pos'][1]][red_pel['pos'][0]]['cover']
+            next_cover_type_r   = get_cover_type_int(next_cover_val_r)
+            def_reward_r = self.red_defense_agents[i].compute_reward(
+                psr['enemy_nearby'], psr['cover_type'], red_def_actions[i], got_hit_red, next_cover_type_r
+            )
+            self.red_defense_agents[i].update(
+                psr['enemy_nearby'], psr['cover_type'],
+                red_def_actions[i], def_reward_r,
+                next_enemy_nearby_r, next_cover_type_r
+            )
+
+            nearest_obj_r = self._nearest_uncaptured_point_red(red_pel)
+            if nearest_obj_r is not None:
+                old_pos_r = tuple(psr['pos'])
+                new_pos_r = tuple(red_pel['pos'])
+                obj_pos_r = tuple(nearest_obj_r['pos'])
+                cap_reward_r = self.red_capture_agents[i].compute_reward(old_pos_r, new_pos_r, obj_pos_r)
+                self.red_capture_agents[i].update(
+                    old_pos_r, obj_pos_r, red_cap_actions[i], cap_reward_r, new_pos_r
+                )
+                self.red_capture_agents[i].update_position_history(new_pos_r)
+
+            # command agent update for red
+            new_obs_r  = red_obs_after[i]
+            cmd_r      = self.red_command_agents[i].compute_reward(
+                psr['obs_vec'], new_obs_r, red_meta_taken[i], red_rewards[i]
+            )
+            self.red_command_agents[i].update(psr['obs_vec'], red_meta_taken[i], cmd_r, new_obs_r)
+
         for i in range(NUM_BLUE):
             rewards[i] += P_STEP
+        for i in range(NUM_RED):
+            red_rewards[i] += P_STEP
 
         terminated = False
+
         if all(self.captured.values()):
             terminated = True
             for i in range(NUM_BLUE):
                 rewards[i] += R_WIN
+            for i in range(NUM_RED):
+                red_rewards[i] += P_LOSE
+
+        if all(self.red_captured.values()):
+            terminated = True
+            for i in range(NUM_RED):
+                red_rewards[i] += R_WIN
+            for i in range(NUM_BLUE):
+                rewards[i] += P_LOSE
 
         if all_dead(self.blue_pelotons):
             terminated = True
             for i in range(NUM_BLUE):
                 rewards[i] += P_LOSE
+            for i in range(NUM_RED):
+                red_rewards[i] += R_WIN
 
-        truncated = False 
+        if all_dead(self.red_pelotons):
+            terminated = True
+            for i in range(NUM_BLUE):
+                rewards[i] += R_WIN
+            for i in range(NUM_RED):
+                red_rewards[i] += P_LOSE
+
+        truncated = False
 
         if terminated or truncated:
             for i in range(NUM_BLUE):
-                # slower decay so agents keep exploring for more episodes
                 self.attack_agents[i].decay_epsilon(decay_rate=0.999,  min_epsilon=0.05)
                 self.defense_agents[i].decay_epsilon(decay_rate=0.999,  min_epsilon=0.05)
                 self.capture_agents[i].decay_epsilon(decay_rate=0.9995, min_epsilon=0.05)
+            for i in range(NUM_RED):
+                self.red_command_agents[i].decay_epsilon(decay_rate=0.999,  min_epsilon=0.05)
+                self.red_attack_agents[i].decay_epsilon(decay_rate=0.999,  min_epsilon=0.05)
+                self.red_defense_agents[i].decay_epsilon(decay_rate=0.999,  min_epsilon=0.05)
+                self.red_capture_agents[i].decay_epsilon(decay_rate=0.9995, min_epsilon=0.05)
 
         if self.render_mode == "human":
             self._render()
@@ -376,47 +547,91 @@ class NormandyEnv(gym.Env):
                     best = pd
         return best
 
-    def _red_turn(self):
-        """
-        Lógica hardcodeada para los rojos:
-        - Si hay un azul a distancia <= 5, atacan.
-        - Si no, se mueven hacia el azul más cercano (movimiento simple).
-        """
-        for red in self.red_pelotons:
-            if red['num_tanks'] <= 0:
-                continue
-            # Encontrar azul más cercano
-            nearest_blue = None
-            min_dist     = 99999
-            for blue in self.blue_pelotons:
-                if blue['num_tanks'] <= 0:
-                    continue
-                d = distance(red['pos'], blue['pos'])
-                if d < min_dist:
-                    min_dist     = d
-                    nearest_blue = blue
+    def _nearest_uncaptured_point_red(self, pel):
+        best      = None
+        best_dist = 99999
+        for name, pd in self.points.items():
+            if not self.red_captured[name]:
+                d = distance(pel['pos'], pd['pos'])
+                if d < best_dist:
+                    best_dist = d
+                    best = pd
+        return best
 
-            if nearest_blue is None:
+    def _snapshot_red_states(self):
+        pre = []
+        for i, red_pel in enumerate(self.red_pelotons):
+            if red_pel['num_tanks'] <= 0:
+                pre.append(None)
                 continue
 
-            if min_dist <= ATTACK_RANGE:
-                target_cover = self.map[nearest_blue['pos'][1]][nearest_blue['pos'][0]]['cover']
-                do_attack(red, nearest_blue, target_cover)
-            else:
-                # move one step toward nearest blue
-                dx = nearest_blue['pos'][0] - red['pos'][0]
-                dy = nearest_blue['pos'][1] - red['pos'][1]
+            blues_in_range = get_enemies_in_range(red_pel, self.blue_pelotons, ATTACK_RANGE)
+            atk_state = self.red_attack_agents[i].get_state(blues_in_range)
 
-                if abs(dx) >= abs(dy):
-                    step_x = 1 if dx > 0 else -1
-                    new_x, new_y = red['pos'][0] + step_x, red['pos'][1]
-                else:
-                    step_y = 1 if dy > 0 else -1
-                    new_x, new_y = red['pos'][0], red['pos'][1] + step_y
+            nearest_blue, nearest_dist = get_nearest_enemy(red_pel, self.blue_pelotons)
+            enemy_nearby = 1 if (nearest_blue is not None and nearest_dist <= 4) else 0
+            cover_val    = self.map[red_pel['pos'][1]][red_pel['pos'][0]]['cover']
+            cover_type   = get_cover_type_int(cover_val)
 
-                if self._is_passable(new_x, new_y) and red['fuel'] > 0:
-                    red['pos']   = [new_x, new_y]
-                    red['fuel'] -= 1
+            pre.append({
+                'hp':               red_pel['hp'],
+                'pos':              list(red_pel['pos']),
+                'atk_state':        atk_state,
+                'enemy_nearby':     enemy_nearby,
+                'cover_type':       cover_type,
+                'enemies_in_range': blues_in_range,
+                'obs_vec':          self._build_red_obs_single(red_pel),
+            })
+        return pre
+
+    def _build_red_obs_single(self, red_pel):
+        nearest_blue, blue_dist = get_nearest_enemy(red_pel, self.blue_pelotons)
+        if nearest_blue is None:
+            enemy_nearby       = 0
+            enemy_dist_clamped = 9
+        else:
+            enemy_nearby       = 1 if blue_dist <= 4 else 0
+            enemy_dist_clamped = min(blue_dist, 9)
+
+        nearest_obj = self._nearest_uncaptured_point_red(red_pel)
+        if nearest_obj is not None:
+            obj_dx     = nearest_obj['pos'][0] - red_pel['pos'][0]
+            obj_dy     = nearest_obj['pos'][1] - red_pel['pos'][1]
+            obj_dx_dir = 0 if obj_dx == 0 else (1 if obj_dx > 0 else 2)
+            obj_dy_dir = 0 if obj_dy == 0 else (1 if obj_dy > 0 else 2)
+            obj_dist   = min(abs(obj_dx) + abs(obj_dy), 9)
+        else:
+            obj_dx_dir = 0
+            obj_dy_dir = 0
+            obj_dist   = 0
+
+        cover_type = get_cover_type_int(self.map[red_pel['pos'][1]][red_pel['pos'][0]]['cover'])
+
+        return np.array([
+            red_pel['hp'] // 100,
+            red_pel['fuel'] // 20,
+            red_pel['ammo'] // 20,
+            red_pel['num_tanks'],
+            cover_type,
+            enemy_nearby,
+            enemy_dist_clamped,
+            1 if self.red_captured['A'] else 0,
+            1 if self.red_captured['B'] else 0,
+            1 if self.red_captured['C'] else 0,
+            obj_dx_dir,
+            obj_dy_dir,
+            obj_dist,
+            red_pel['pos'][0] // 5,
+            red_pel['pos'][1] // 5,
+            1 if red_pel['ammo'] < 20 else 0,
+        ], dtype=np.float32)
+
+    def _get_red_obs(self):
+        return [
+            self._build_red_obs_single(red_pel) if red_pel['num_tanks'] > 0
+            else np.zeros(OBS_SIZE, dtype=np.float32)
+            for red_pel in self.red_pelotons
+        ]
 
     # -------------------------------------------------------------------------
     # observation, info, render
@@ -475,14 +690,13 @@ class NormandyEnv(gym.Env):
         return obs_list
 
     def _get_info(self):
-        """
-        Información adicional para depuración.
-        """
         return {
-            'step': self.step_count,
-            'blue_alive': sum(1 for p in self.blue_pelotons if p['num_tanks'] > 0),
-            'red_alive': sum(1 for p in self.red_pelotons if p['num_tanks'] > 0),
-            'captured': self.captured.copy()
+            'step':         self.step_count,
+            'blue_alive':   sum(1 for p in self.blue_pelotons if p['num_tanks'] > 0),
+            'red_alive':    sum(1 for p in self.red_pelotons  if p['num_tanks'] > 0),
+            'captured':     self.captured.copy(),
+            'red_captured': self.red_captured.copy(),
+            'red_eps':      self.red_command_agents[0].epsilon,
         }
 
     def increase_episode(self):
