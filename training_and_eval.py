@@ -1,10 +1,9 @@
-from env.normandy_env import NormandyEnv
+from env.normandy_env import make_env
 from agents.command_agent import command_agent
 
 
 def train(episodes=5000, render_every=500):
-    # env = NormandyEnv(render_mode="human")
-    env = NormandyEnv(render_mode="human")
+    env = make_env(render_mode="human")
     #commander = command_agent()
 
     rewards_history = []   # to compute moving average
@@ -16,7 +15,7 @@ def train(episodes=5000, render_every=500):
         obs, _ = env.reset()
         total_reward = 0
         done = False
-        env.increase_episode()
+        env.unwrapped.increase_episode()
         
 
         while not done:

@@ -164,7 +164,7 @@ class NormandyEnv(gym.Env):
         for ca in self.capture_agents:
             ca.reset_position_history()
 
-       
+        self.obs = self._get_obs()
         return self.obs, self._get_info()
 
     def step(self, commander_meta_actions):
@@ -332,11 +332,9 @@ class NormandyEnv(gym.Env):
         if self.render_mode == "human":
             self._render()
 
-        total_reward = sum (rewards)
-
         self.obs = self._get_obs()
 
-        return self._get_obs(), total_reward, terminated, truncated, self._get_info()
+        return self.obs, rewards, terminated, truncated, self._get_info()
 
     # -------------------------------------------------------------------------
     # helpers used inside step()
@@ -474,7 +472,7 @@ class NormandyEnv(gym.Env):
 
             obs_list.append(obs)
 
-        return np.concatenate(obs)
+        return obs_list
 
     def _get_info(self):
         """
@@ -605,16 +603,15 @@ class NormandyEnv(gym.Env):
             pygame.quit()
             self.window = None
 
-   
-    def make_env(render_mode=None, max_steps=500, clip_action=True):
-        env = NormandyEnv(render_mode=render_mode)
-        env = TimeLimit(env, max_episode_steps=max_steps)
-        if clip_action:
-            env = ClipAction(env)
-        return env
-    
-    """
-    Crea una instancia del entorno NormandyEnv y le aplica los wrappers:
-    TimeLimit: limita la duración del episodio a `max_steps` pasos.
-    ClipAction: recorta las acciones al rango del action_space .
-    """
+
+
+def make_env(render_mode=None, max_steps=500, fog_of_war=True, action_mask=True):
+    from env.wrappers import FogOfWarWrapper, ActionMaskWrapper, EpisodeStatsWrapper
+    env = NormandyEnv(render_mode=render_mode)
+    if fog_of_war:
+        env = FogOfWarWrapper(env)
+    if action_mask:
+        env = ActionMaskWrapper(env)
+    env = TimeLimit(env, max_episode_steps=max_steps)
+    env = EpisodeStatsWrapper(env)
+    return env
