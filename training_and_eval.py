@@ -39,16 +39,19 @@ def train(episodes=5000, render_every=500):
         rewards_history.append(total_reward)
 
         if (ep + 1) % 50 == 0:
-            avg50 = sum(rewards_history[-50:]) / len(rewards_history[-50:])
-            caps  = sum(1 for v in info['captured'].values() if v)
+            avg50     = sum(rewards_history[-50:]) / len(rewards_history[-50:])
+            blue_caps = sum(1 for v in info['captured'].values() if v)
+            red_caps  = sum(1 for v in info['red_captured'].values() if v)
             print(
                 f"ep {ep + 1:4d}  "
                 f"reward={total_reward:8.1f}  "
                 f"avg50={avg50:8.1f}  "
                 f"blue={info['blue_alive']}  "
                 f"red={info['red_alive']}  "
-                f"captured={caps}/3  "
-                f"eps={commanders[0].epsilon:.3f}"
+                f"blue_caps={blue_caps}/3  "
+                f"red_caps={red_caps}/3  "
+                f"blue_eps={commanders[0].epsilon:.3f}  "
+                f"red_eps={info['red_eps']:.3f}"
             )
 
     env.close()

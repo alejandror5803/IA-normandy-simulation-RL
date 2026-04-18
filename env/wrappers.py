@@ -87,3 +87,85 @@ class EpisodeStatsWrapper(gym.Wrapper):
         }
 
 
+class FogOfWarWrapper(gym.ObservationWrapper):
+    # Applies fog of war: if the nearest enemy is further than `visibility_range`
+    # cells, the enemy features in the obs vector are hidden (zeroed out).
+    # Historically grounded — WWII units had limited battlefield visibility,
+    # so the agent has to act without knowing where distant enemies are.
+
+    ENEMY_NEARBY_IDX = 5
+    ENEMY_DIST_IDX   = 6
+
+    def __init__(self, env, visibility_range=8):
+        super().__init__(env)
+        self.visibility_range = visibility_range
+
+    def observation(self, obs):
+        result = []
+        for pel_obs in obs:
+            masked = pel_obs.copy()
+            enemy_dist = int(pel_obs[self.ENEMY_DIST_IDX])
+            if enemy_dist > self.visibility_range:
+                masked[self.ENEMY_NEARBY_IDX] = 0.0
+                masked[self.ENEMY_DIST_IDX]   = 9.0
+            result.append(masked)
+        return result
+
+
+class ActionMaskWrapper(gym.Wrapper):
+    # Computes which meta-actions are actually valid for each peloton right now
+    # and exposes that as 'action_masks' in info. Also fixes invalid actions before
+    # they reach the env, so the agent never wastes a step on something impossible.
+    #
+    # Rules:
+    #   META_ATTACK   (1) -> invalid if peloton has no ammo
+    #   META_RESUPPLY (3) -> invalid if peloton is not standing on a supply point
+
+    META_ATTACK   = 1
+    META_RESUPPLY = 3
+    FALLBACK      = 0  # META_CAPTURE — always a safe default
+
+    def __init__(self, env, redirect_invalid=True):
+        super().__init__(env)
+        self.redirect_invalid = redirect_invalid
+
+    def _compute_masks(self):
+        base_env = self.unwrapped
+        masks = []
+        for pel in base_env.blue_pelotons:
+            mask = [True, True, True, True]
+
+            if pel['num_tanks'] <= 0:
+                masks.append(mask)
+                continue
+
+            if pel['ammo'] <= 0:
+                mask[self.META_ATTACK] = False
+
+            on_supply_point = any(
+                pel['pos'] == pd['pos']
+                for pd in base_env.points.values()
+            )
+            if not on_supply_point:
+                mask[self.META_RESUPPLY] = False
+
+            masks.append(mask)
+        return masks
+
+    def reset(self, **kwargs):
+        obs, info = self.env.reset(**kwargs)
+        info['action_masks'] = self._compute_masks()
+        return obs, info
+
+    def step(self, actions):
+        if self.redirect_invalid:
+            masks = self._compute_masks()
+            corrected_actions = list(actions)
+            for i, (action, mask) in enumerate(zip(actions, masks)):
+                if not mask[action]:
+                    corrected_actions[i] = self.FALLBACK
+            actions = corrected_actions
+
+        obs, rewards, terminated, truncated, info = self.env.step(actions)
+        info['action_masks'] = self._compute_masks()
+        return obs, rewards, terminated, truncated, info
