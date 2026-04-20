@@ -54,7 +54,7 @@ class NormandyEnv(gym.Env):
 
     metadata = {"render_modes": ["human"], "render_fps": 4}
 
-    def __init__(self, render_mode=None, seed=42, render_every=1000):
+    def __init__(self, render_mode=None, seed=efg.SEED, render_every=efg.RENDER_EVERY):
         super().__init__()
 
         self.render_mode   = render_mode

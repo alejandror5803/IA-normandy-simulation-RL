@@ -119,7 +119,9 @@ class command_agent:
 
         best_next_q = np.max(self.q_table[next_state])
         old_q       = self.q_table[state][action]
-        self.q_table[state][action] = old_q + self.lr * (reward + self.gamma * best_next_q - old_q)
+        td_error    = reward + self.gamma * best_next_q - old_q
+        self.q_table[state][action] = old_q + self.lr * td_error
+        return abs(td_error)
 
     def decay_epsilon(self, decay_rate=0.995, min_epsilon=0.05):
         self.epsilon = max(min_epsilon, self.epsilon * decay_rate)

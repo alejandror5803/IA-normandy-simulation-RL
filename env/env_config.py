@@ -28,3 +28,13 @@ P_STEP          = -0.1
 
 # observation vector size (one per blue peloton)
 OBS_SIZE = 16
+
+# seed for the map
+SEED = 63
+
+# render every N episodes default
+RENDER_EVERY = 1000
+
+# metrics / plotter
+MOVING_AVG_WINDOW = 50
+PLOTS_SAVE_PATH   = "results"
