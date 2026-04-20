@@ -1,7 +1,9 @@
+# implement libraries
 import env.env_config as efg
 from env.units import distance
 from env.map_generator import IMPASSABLE
 
+# implementing from the enviroment constants
 ATTACK_RANGE    = efg.ATTACK_RANGE
 TIGER_DAMAGE    = efg.TIGER_DAMAGE   # Tiger tank — historically superior firepower
 SHERMAN_DAMAGE  = efg.SHERMAN_DAMAGE   # Sherman tank — baseline
@@ -9,6 +11,15 @@ DAMAGE_PER_ATTACK = efg.DAMAGE_PER_ATTACK  # default kept for red team
 
 
 def get_enemies_in_range(peloton, all_enemies, attack_range=ATTACK_RANGE):
+    """ 
+    Calculates the distance of each of the enemies
+    all_enemies: list of all the enemies
+    attack range: constant
+
+    returns the distance of all the enemies
+    ( It does not calculate the pelloton enemy when )
+    """
+   
     in_range = []
     for enemy in all_enemies:
         if enemy['num_tanks'] <= 0:
@@ -19,6 +30,14 @@ def get_enemies_in_range(peloton, all_enemies, attack_range=ATTACK_RANGE):
 
 
 def get_nearest_enemy(peloton, all_enemies):
+    """
+    Calculates the nearest enemy and their distances
+
+    peloton: exact peloton to calculate the distance
+    all_enemies: list with them
+    
+    returns the enemy and its distance
+    """
     nearest = None
     min_dist = 99999
     for enemy in all_enemies:
@@ -32,6 +51,14 @@ def get_nearest_enemy(peloton, all_enemies):
 
 
 def do_attack(attacker, target, target_cover=0.0, damage_per_tank=DAMAGE_PER_ATTACK):
+    """
+    Function that activates an attack to an target
+
+    attacker
+    target: to which enemy it shoots
+
+    returns the damage made by the attacker
+    """
     if attacker['ammo'] <= 0 or attacker['num_tanks'] <= 0:
         return 0
 
@@ -50,6 +77,7 @@ def do_attack(attacker, target, target_cover=0.0, damage_per_tank=DAMAGE_PER_ATT
 
 
 def get_cover_type_int(cover_value):
+    
     # maps terrain cover float to the 3 levels used by defense_agent
     # 0 = no cover, 1 = light cover (bush/rubble), 2 = heavy cover (forest/wall)
     if cover_value <= 0.0:
@@ -78,7 +106,7 @@ def get_best_cover_cell(peloton, grid, map_size):
 
     return best_pos
 
-
+# It makes a resupply of ammo or fuel to a peloton
 def do_resupply(peloton, point_data):
     fuel_needed = 100 - peloton['fuel']
     ammo_needed = 100 - peloton['ammo']
@@ -93,6 +121,6 @@ def do_resupply(peloton, point_data):
 
     return (fuel_given + ammo_given) > 0
 
-
+# it asks if all pelotons are dead
 def all_dead(pelotons):
     return all(p['num_tanks'] <= 0 for p in pelotons)

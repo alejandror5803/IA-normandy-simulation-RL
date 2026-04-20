@@ -95,6 +95,8 @@ class defense_agent:
         cover_type: Which cover is near the agent
         action: latest action of the Agent
         reward: quantitative value
+        next_enemy_nearby: the distance
+        nxt_cover_type: the nearbiest cover type
         
         
         """
