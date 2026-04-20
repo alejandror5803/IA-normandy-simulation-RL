@@ -105,6 +105,7 @@ class NormandyEnv(gym.Env):
         self.tiger_img       = None   # cached so we don't reload every step
         self.sherman_img     = None
         self.map_bg_surface  = None   # optional background image (mapaNormandia.png)
+        self.active_explosions = []   # list of {pos, frames_left} for hit effects
 
         self.reset()
 
@@ -158,6 +159,7 @@ class NormandyEnv(gym.Env):
         }
         self.captured   = {'A': False, 'B': False, 'C': False}
         self.step_count = 0
+        self.active_explosions = []
 
         # same starting positions every episode (set once in __init__)
         self.blue_pelotons = []
@@ -229,6 +231,7 @@ class NormandyEnv(gym.Env):
                         if dmg > 0:
                             hit_confirmed[i] = True
                             rewards[i] += dmg * 0.5   # bigger signal per hit
+                            self.active_explosions.append({'pos': list(target['pos']), 'frames_left': 4})
                         if old_tanks > 0 and target['num_tanks'] <= 0:
                             rewards[i] += R_DESTROY_ENEMY
 
@@ -324,6 +327,7 @@ class NormandyEnv(gym.Env):
                     if dmg > 0:
                         red_hit_confirmed[i] = True
                         red_rewards[i] += dmg * 0.5
+                        self.active_explosions.append({'pos': list(target['pos']), 'frames_left': 4})
                     if old_tanks > 0 and target['num_tanks'] <= 0:
                         red_rewards[i] += R_DESTROY_ENEMY
 
@@ -741,6 +745,7 @@ class NormandyEnv(gym.Env):
                 self.tiger_img   = None
                 self.sherman_img = None
 
+        pygame.event.pump()   # keeps the OS from marking the window as "not responding"
         pygame.display.set_caption(f"Normandy RL — ep {self.episode}  step {self.step_count}")
 
         terrain_colors = {
@@ -808,6 +813,24 @@ class NormandyEnv(gym.Env):
         pygame.draw.rect(self.window, (0, 0, 0), hud_rect)
         self.window.blit(hud_surf, (10, 8))
 
+        # draw explosion effects on hit tanks
+        still_alive = []
+        for exp in self.active_explosions:
+            ex = exp['pos'][0] * cell_size + cell_size // 2
+            ey = exp['pos'][1] * cell_size + cell_size // 2
+            alpha = int(220 * exp['frames_left'] / 4)
+            radius = cell_size // 2 + 4
+            exp_surf = pygame.Surface((cell_size * 3, cell_size * 3), pygame.SRCALPHA)
+            center = (cell_size + cell_size // 2, cell_size + cell_size // 2)
+            pygame.draw.circle(exp_surf, (255, 200, 0, alpha),            center, radius)
+            pygame.draw.circle(exp_surf, (255, 80,  0, min(255, alpha + 40)), center, radius // 2)
+            pygame.draw.circle(exp_surf, (255, 255, 200, min(255, alpha + 80)), center, radius // 4)
+            self.window.blit(exp_surf, (ex - cell_size - cell_size // 2, ey - cell_size - cell_size // 2))
+            exp['frames_left'] -= 1
+            if exp['frames_left'] > 0:
+                still_alive.append(exp)
+        self.active_explosions = still_alive
+
         pygame.display.flip()
         self.clock.tick(self.metadata["render_fps"])
     
@@ -819,9 +842,9 @@ class NormandyEnv(gym.Env):
 
 
 
-def make_env(render_mode=None, max_steps=500, fog_of_war=True, action_mask=True):
+def make_env(render_mode=None, max_steps=500, fog_of_war=True, action_mask=True, render_every=efg.RENDER_EVERY):
     from env.wrappers import FogOfWarWrapper, ActionMaskWrapper, EpisodeStatsWrapper
-    env = NormandyEnv(render_mode=render_mode)
+    env = NormandyEnv(render_mode=render_mode, render_every=render_every)
     if fog_of_war:
         env = FogOfWarWrapper(env)
     if action_mask:
