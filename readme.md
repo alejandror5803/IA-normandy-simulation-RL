@@ -95,3 +95,8 @@ Agente de dominacion
 Agente de status (como esta cada peloton)
 Agente Principal (field marshal) (Toma la decision final basada en lo comunicado por cada agente)
  
+
+
+
+
+ #### Añadir archivo config para cambiar variables hardcodeadas

@@ -10,6 +10,7 @@ class field_marshal:
     def __init__(self):
         pass
 
+    # Counts which os the count in all platoons
     def count_alive(self, platoons):
         count = 0
         for platoon in platoons:
@@ -17,12 +18,14 @@ class field_marshal:
                 count += 1
         return count
 
+    # Counts all the enemys in the range in the observations
     def count_enemies_in_range(self, observations):
         total = 0
         for obs in observations:
             total += len(obs["enemies_in_range"])
         return total
 
+    # Choose the most reffered action in the battle field
     def choose_action(self, blue_platoons, red_platoons, objectives, observations):
         """
         blue_platoons: blue platoons list

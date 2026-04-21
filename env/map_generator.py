@@ -1,3 +1,4 @@
+# implements libraries
 import random
 from collections import deque
 
@@ -30,10 +31,12 @@ POINT_SUPPLY_LIMITS = {
 
 class MapGenerator:
 
+    # initializes the class in seed 42 , with a map size of 25
     def __init__(self, size=25, seed=42):
         self.size = size
         random.seed(seed)
 
+    # return the terrain type
     def _cell(self, terrain):
         return {"type": terrain, **TERRAIN_TYPES[terrain]}
 
@@ -51,11 +54,14 @@ class MapGenerator:
         cells_placed = 1
 
         while queue and cells_placed < max_cells:
+
             cx, cy = queue.popleft()
             dirs = [(0, -1), (0, 1), (1, 0), (-1, 0)]
             random.shuffle(dirs)
+
             for dx, dy in dirs:
                 nx, ny = cx + dx, cy + dy
+
                 if (nx, ny) in visited:
                     continue
                 if not (0 <= nx < self.size and 0 <= ny < self.size):
@@ -70,6 +76,7 @@ class MapGenerator:
 
     # Place a small city-block area: WALL buildings with OPEN streets between them
     def _place_urban(self, grid, start_x, start_y, width, height):
+
         for row_i in range(height):
             for col_i in range(width):
                 x = start_x + col_i
@@ -78,6 +85,7 @@ class MapGenerator:
                     continue
                 if grid[y][x]["type"] == "WATER":
                     continue
+
                 # streets every 3rd column and every 3rd row, rest is buildings
                 if col_i % 3 == 2 or row_i % 3 == 2:
                     t = "OPEN"
@@ -140,10 +148,12 @@ class MapGenerator:
 
         return grid
 
+    # it get's fix coordinates of one spot
     @staticmethod
     def get_points():
         return FIXED_POINTS
 
+    # verification of a specific position in passable (transitable is bool)
     @staticmethod
     def is_passable(grid, x, y):
         if not (0 <= x < len(grid[0]) and 0 <= y < len(grid)):

@@ -1,20 +1,26 @@
 import numpy as np
 import random
-
+import agents.agents_config as cfg
 
 # mirrors the meta-action IDs in normandy_env.py
-META_CAPTURE  = 0
-META_ATTACK   = 1
-META_DEFENSE  = 2
-META_RESUPPLY = 3
+META_CAPTURE  = cfg.META_CAPTURE
+META_ATTACK   = cfg.META_ATTACK
+META_DEFENSE  = cfg.META_DEFENSE
+META_RESUPPLY = cfg.META_RESUPPLY
 
 # same as ATTACK_RANGE in combat_logic.py
-ATTACK_RANGE = 3
+ATTACK_RANGE = cfg.ATTACK_RANGE
 
 
 class command_agent:
 
     def __init__(self, lr=0.1, gamma=0.9, epsilon=0.3):
+        """
+        Inizialites the class o the capture agent
+    
+        Defining the parameters, like the Leraning Rate, gamma & epsilon.
+        All as a float. As well as the number of states and actions possibles for the q table
+        """
         self.lr      = lr
         self.gamma   = gamma
         self.epsilon = epsilon
@@ -42,6 +48,7 @@ class command_agent:
         num_actions = 4
         self.q_table = np.zeros((num_states, num_actions))
 
+    # Depending on the observation of the peloton it will change
     def _obs_to_state(self, peloton_obs):
         hp_bucket    = int(peloton_obs[0])
         enemy_nearby = int(peloton_obs[5])
@@ -68,12 +75,14 @@ class command_agent:
         state = (hp_level * 54) + (threat_level * 18) + (obj_dx_dir * 6) + (obj_dy_dir * 2) + low_ammo
         return state
 
+    # Chooses action only from the peloton
     def choose_action(self, peloton_obs):
         state = self._obs_to_state(peloton_obs)
         if random.random() < self.epsilon:
             return random.randint(0, 3)
         return int(np.argmax(self.q_table[state]))
 
+    # Chooses best action for the whole team
     def choose_actions_for_team(self, obs_tuple):
         actions = []
         for peloton_obs in obs_tuple:
@@ -81,6 +90,21 @@ class command_agent:
         return actions
 
     def compute_reward(self, obs_before, obs_after, action, env_reward):
+        """
+        Quantificates an reward depending on the decision
+
+        Parameters:
+        obs_before: observation at the current state
+        obs_after: observation after the current state
+        action: latest action of the Agent
+        reward: quantitative value
+        env_reward = The reward in each iteration
+
+        Return:
+           The reward based on the action of the Agent.
+        
+        """
+
         reward = env_reward
 
         enemy_nearby = int(obs_before[5])
@@ -114,12 +138,34 @@ class command_agent:
         return reward
 
     def update(self, obs_before, action, reward, obs_after):
+        """
+        Updates the state of the Agent
+
+        Parameters:
+        
+        obs_before: observation at the current state
+        action: latest action of the Agent
+        reward: quantitative value
+        obs_after: observation after the current state
+        
+        """
         state      = self._obs_to_state(obs_before)
         next_state = self._obs_to_state(obs_after)
 
         best_next_q = np.max(self.q_table[next_state])
         old_q       = self.q_table[state][action]
-        self.q_table[state][action] = old_q + self.lr * (reward + self.gamma * best_next_q - old_q)
+        td_error    = reward + self.gamma * best_next_q - old_q
+        self.q_table[state][action] = old_q + self.lr * td_error
+        return abs(td_error)
 
     def decay_epsilon(self, decay_rate=0.995, min_epsilon=0.05):
+        """
+        Chooses the maximum epsilon between the min epsilon 
+        and the current * the decay rate
+
+        Parameters:
+        decay_rate=0.995 
+        min_epsilon=0.05
+
+        """
         self.epsilon = max(min_epsilon, self.epsilon * decay_rate)
