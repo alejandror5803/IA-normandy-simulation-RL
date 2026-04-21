@@ -30,7 +30,7 @@ P_STEP          = -0.1
 OBS_SIZE = 16
 
 # seed for the map
-SEED = 63
+SEED = 42
 
 # render every N episodes default
 RENDER_EVERY = 1000

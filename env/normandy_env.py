@@ -850,7 +850,7 @@ class NormandyEnv(gym.Env):
 
 
 # implements the wrappers used in wrappers.py to the enviroment
-def make_env(render_mode=None, max_steps=500, fog_of_war=True, action_mask=True):
+def make_env(render_mode=None, max_steps=500, fog_of_war=True, action_mask=True, render_every=efg.RENDER_EVERY):
     from env.wrappers import FogOfWarWrapper, ActionMaskWrapper, EpisodeStatsWrapper
     env = NormandyEnv(render_mode=render_mode, render_every=render_every)
     if fog_of_war:
