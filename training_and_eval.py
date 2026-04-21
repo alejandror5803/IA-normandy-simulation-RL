@@ -4,8 +4,8 @@ from utils.metrics_and_plotter import EpisodeTracker, plot_all
 import env.env_config as cfg
 
 
-def train(episodes=5000, render_every=500):
-    env = make_env(render_mode="human")
+def train(episodes=5000, render_every=1000):
+    env = make_env(render_mode="human", render_every=render_every)
 
     tracker = EpisodeTracker()
 
@@ -63,4 +63,4 @@ def train(episodes=5000, render_every=500):
 
 
 if __name__ == "__main__":
-    train(episodes=1000, render_every=1000)
+    train(episodes=2000, render_every=300)
