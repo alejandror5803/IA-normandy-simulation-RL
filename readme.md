@@ -1,102 +1,189 @@
+**IA-Normandy – Normandy Battle Simulation with RL**
 
+Artificial Intelligence course project. Multi-agent tactical simulation of the Battle of Normandy implemented using Gymnasium and tabular Q-Learning.
 
-idea principal:
+----------------------------------------------------
 
-sistema multi-agente 100% en gymnasium y usando Q-Learning simple (no DQN ni otras opciones) en el que cada agente debera de controlar 1 peloton individual (habiendo 4 en el equipo azul) y luego un agente que gestione a los 4 agentes de cada peloton (1 agente q controla 4 agentes).
+**Table of Contents**
+   - Description
+   - Multi-Agent Architecture
+   - Project Structure
+   - Environment
+   - Installation 
+   - Usage
+   - Results
+   - Future Work
+   - Authors
 
-la mision de estos agentes es tomar los puntos A,B y C del mapa de normandia, al mismo tiempo que luchar contra el equipo rojo, el equipo azul tiene una inferioridad de 1:3
+----------------------------------------------------
 
-Pelotones:
-- formado por 5 tanques
-- si hay 5 tanques y la vida de cada uno es 100, el peloton tiene 500HP si este baja de 100HP se asume que uno de los que lo formaban ha sido destruido y la capacidad de fuego disminuye de 5 a 4 tanques haciendo menos daño
-- cada tanque hace un determinado daño, este se multiplica por el nº de tanques que forman el peloton
-- se tienen 100 de gas y 15-20 de municion por tanque
-- deben de evitar los obstaculos que se generan en el mapa
-- deben recoger los suministros
+**Description**
+IA-Normandy is a tactical simulation of the Battle of Normandy (and later the Battle of Caen) in a 2D grid environment of 25x25 cells. The project models a historically accurate numerical imbalance: the blue team (Germans, Tigers) starts at a 1:3 disadvantage against the red team (Allies, Shermans), but compensates with greater armor and firepower per unit.
 
-Puntos:
-- El pto B es el mas valioso
-- A y C mismo valor
-- en los puntos se podran recoger suministros
-- tienen un limite de suministros 1000 de gas y 50 de municion
+The objectives of the blue team are:
+   - Capture and hold points of interest A, B, and C (with B being the most strategically valuable).
+   - Engage the enemy while taking advantage of terrain cover.
 
-Equipo Rojo:
-- de primeras estara hardcodeado, luego se intentara que fuese otro agente
-- la entidad que lo represente en el grid2d debe usar el resource sherman.png
+Learning is carried out using tabular Q-Learning, with a hierarchical structure of agents that make decisions at different levels of abstraction.
 
-Equipo Azul:
-- 4 pelotones manejados cada uno por un agente singular (4 agentes)
-- la entidad que lo represente en el grid2d debe usar el resource tiger.png
+----------------------------------------------------
 
-Mapa:
-- habran 3 puntos de interes (A,B,C)
-- se generaran obstaculos de manera aleatoria y procedural en el mapa
-- el grid 2D 25x25 celdas usando pygame y el resource mapa.png como fondo
+**Multi-Agent Architecture**
+The system is organized into two hierarchical levels:
+   - Commander Agent: Coordinates the platoon’s sub-agents. Receives the mission from the Marshal and executes it.
+   - Attack Agent: Decides whether to attack the nearest enemy within its observation range. It is penalized if an enemy is present and it     does not fire; it is rewarded for each successful hit.
+   - Capture Agent: Moves the platoon toward the designated objective. It is rewarded for getting closer and penalized for moving away.
+   - Defense Agent: Manages the defense of already captured points. Coordinates the platoon’s defensive positioning when assigned to hold an objective.
 
-Acciones Pelotones:
-   0 = MOVE_NORTH        (mover hacia el norte)
-   1 = MOVE_SOUTH        (mover hacia el sur)
-   2 = MOVE_EAST         (mover hacia el este)
-   3 = MOVE_WEST         (mover hacia el oeste)
-   4 = ATTACK_NEAREST    (atacar al enemigo más cercano en rango)
-   5 = TAKE_COVER        (buscar celda de cobertura adyacente)
-   6 = RESUPPLY          (solicitar suministros si está en zona base)
-   7 = HOLD_POSITION     (mantener posición y esperar)
+----------------------------------------------------
 
-Tipos de estructura y obstaculos del mapa:
-Tipo Celda	Valor Cobertura	Penalización Mov.	Descripción
-OPEN	0.0	0	Terreno abierto — sin cobertura
-BUSH	0.3	1	Arbustos — cobertura ligera
-FOREST	0.6	2	Bosque — cobertura moderada
-RUBBLE	0.5	1	Escombros — cobertura buena
-WALL	0.9	3	Muro — cobertura alta
-WATER	0.0	99	Agua — infranqueable
+**Environment**
+Map and Terrain
+The environment is a 25x25 grid rendered with Pygame, using mapaNormandia.png as the background. Obstacles are generated procedurally and randomly in each episode.
 
+Sample of the map used
+![Environment](resources/mapaNormandia.png)
 
+Cell type              Cover          Movement penalty         Description
+OPEN                    0.0                  0                 Open terrain with no cover
+BUSH                    0.3                  1                 Bushes, light cover
+FOREST                  0.6                  2                 Forest, moderate cover
+RUBBLE                  0.5                  1                 Debris, good cover
+WALL                    0.9                  3                 Wall, high cover
+WATER                   0.0                  99                Water, impassable 
 
+**Points of interest**
+Point              Strategic Value            Notess
+  A                    Medio                  Allows supply collection (limit: 1000 fuel, 50 ammo)
+  B                    Alto                   The most valuable due to its central position
+  C                    Medio                  Same as A
 
-Posible implementacion de Perbatin (Si sobra tiempo) [nivel de locura de las tropas]
+**Platoons**
+Team            Platoons         Tanks/Platoon      HP/Platoon              Image
+Blue (Tigers)        4                    7                 700       ![Tiger](resources/tiger.png)
+Red (Shermans)   12(3:1)                 3                 300       ![Sherman](resources/sherman.png)
 
+When HP drops below 100, a tank is destroyed and the platoon’s firepower decreases proportionally.
 
+**Commander Meta-Actions (per platoon)**
+Meta-Acción           Code              Delegated Sub-Agent
+META_CAPTURE           0                Capture Agent – Moves toward the objective
+META_ATTACK            1                Attack Agent – Decides whether to fire
+META_DEFENSE           2                Defense Agent – Seeks cover
+META_RESUPPLY          3                Resupply – Directly at supply point
 
-CONTENIDO DE LA PAGINA DEL CANVA:
-La practica se basara en la simulación de la batalla de Normandía mediante RL, el equipo azul (los alemanes) comenzaran siendo el equipo que aprenda mediante RL.
+**Observation Vector (per platoon)**
+Each platoon receives a vector of 16 integer values in the range [0–9]:
+0     hp_hundreds    0-5      Platoon HP in hundreds
+1     fuel_level     0-5      Fuel level (fuel // 20)
+2     ammo_level     0-5      Ammunition level (ammo // 20)
+3     num_tanks      0-5      Remaining operational tanks
+4     cover_type     0-2      Type of cover in the current cell
+5     enemy_nearby   0-1      Enemy within <= 4 cells
+6     enemy_dist     0-9      Distance to the nearest enemy
+7     captured_A     0-1      Punto A captured by blue
+8     captured_B     0-1      Punto B captured by blue
+9     captured_C     0-1      Punto C captured by blue
+10    obj_dx_dir     0-2      X direction to the objective (0 = same, 1 = right, 2 = left)
+11    obj_dy_dir     0-2      Y direction to the objective (0 = same, 1 = down, 2 = up)
+12    obj_dist       0-9      Manhattan distance to the objective
+13    sector_x       0-4      Map sector in X (pos // 5)
+14    sector_y       0-4      Map sector in Y (pos // 5)
+15    low_ammo       0-1      Critical ammo flag (<20)
 
- 
+**Available actions (per platoon)**
+Acción            Código            Descripción
+MOVE_NORTH          0               Move north
+MOVE_SOUTH          1               Move south
+MOVE_EAST           2               Move east
+MOVE_WEST           3               Move west
+ATTACK_NEAREST      4               Attack the nearest enemy in range
+TAKE_COVER          5               Seek an adjacent covered cell
+RESUPPLY            6               Resupply if in the base zone
+HOLD_POSITION       7               Hold position and wait
 
-El agente del equipo azul, debe gestionar las cadenas de suministro para reabastecer a los tanques, gestionar los pelotones de tanques, dividir la fuerza inicial (20 tanques) en pelotones, tomar los puntos A,B,C del mapa, siendo B el mas valioso debido a su posición estratégica. Debe de poder defender a sus tropas/pelotones, atacando a las fuerzas enemigas y escondiéndose detrás de coberturas apropiadas.
+----------------------------------------------------
 
- 
+**Gymnasium Wrappers**
+Wrappers allow us to add functionality to the base environment without modifying its code. They are stacked in layers on top of the environment, so that each one transforms observations, actions, or metrics before they reach the agent or the training loop.
 
-Una vez que el agente del equipo azul aprenda y funcione bien, la idea es trasladar esto mismo al equipo rojo, para simular la batalla de caen mediante 2 agentes que controlan a un equipo cada uno usando RL.
+We have used the following:
+   - FogOfWarWrapper: Hides enemies beyond 8 cells. Simulates the historical fog of war.
+   - ActionMaskWrapper: Prevents invalid actions (attacking without ammo, resupplying outside supply points). Automatically redirects to     META_CAPTURE.
+   - TimeLimit: Limits each episode to a maximum number of steps (default: 500).
+   - EpisodeStatsWrapper: Sliding window over the last 100 episodes
+         Average reward, average steps, and average captures
+   - ObsNormWrapper: Normalizes the observation vector to [0, 1].
 
- 
+----------------------------------------------------
 
-El equipo azul (Alemania) tiene una desventaja de que parte con una inferioridad de 3:1 según datos históricos -- (por cada tanque alemán hay 3 tanques aliados)
+**Instalation**
+Requirements
+   - Python 3.10 or higher
+   - pip
+Steps:
+   - 1. Clone repository
+   - 2. (Recomended) Create a virtual environment
+   - 3. Install dependency
+Main dependencies: gymnasium, pygame, numpy, matplotlib
 
-Los tanques Alemanes deben de tener mas blindaje/vida que los aliados (datos históricos)
+----------------------------------------------------
 
- 
+**Usage**
+Training with Pygame Visualization
+To enable rendering, instantiate the environment with render_mode = "human" in training_and_eval.py.
+The environment only renders every render_every episodes (configurable in env/env_config.py) so as not to reduce training speed.
+When a platoon is hit, an animated explosion visual effect is displayed over its position (orange -> red -> white, lasting 4 frames).
 
-Dado que son muchas decisiones las que debe de tomar, la estructura agentica sera la siguiente:
+**Results**
+Terminal output during training
+![Terminal output](results/terminal.png)
 
- 
+Render image
+![Render example](results/render_ex.png)
 
-Peloton individual:
+Training Performance:
+Displays the total reward per episode (light blue) along with its 50-episode moving average (dark blue), the episode length in steps, and the commander agent’s TD error. It can be observed that episodes shorten rapidly during the first 250 episodes, indicating that the agents learn to end the game efficiently.
+![Training performance](results/training_curves.png)
 
-Agente de ataque
-Agente de captura
-Agente de suministros
-Agente de cobertura/defensa
-Agente Comandante 
-Estrategia:
+Epsilon Decay – Exploration vs Exploitation:
+Evolution of epsilon for each type of agent throughout training. The capture agent (orange) decays more slowly (decay = 0.9995) than the others (decay = 0.999), as it requires more exploration to learn navigation routes.
+![Epsilon decay](results/epsilon_decay.png)
 
-Agente de dominacion
-Agente de status (como esta cada peloton)
-Agente Principal (field marshal) (Toma la decision final basada en lo comunicado por cada agente)
- 
+Attack and Defense Agents – Q-values and Policy:
+The attack agent correctly learns to fire when enemies are within range.
+The defense agent learns to seek cover when enemies are nearby and to remain stationary when already in high cover (Wall).
+![Attack and defense agents](results/attack_defense_policy.png)
 
+Capture Agent – Policy and State Values:
+At short distances, state values are positive, while at longer distances negative values increase, reflecting the penalty for moving away from the objective.
+![Capture agent policy](results/capture_agent_policy.png)
 
+Commander Agent – Policy and State Values:
+With normal ammunition and enemies within range, the agent learns to attack when HP is high and to resupply when it is low.
+With low ammunition, it always prioritizes capturing regardless of the threat.
+![Command agente policy](results/command_agent_policy.png)
 
+he plots are automatically generated at the end of training using metrics_and_plotter.py, which logs per episode the total reward, duration, TD error, captures, and the epsilon of each type of agent, and saves them in the folder configured in env_config.py ('PLOTS_SAVE_PATH').
 
- #### Añadir archivo config para cambiar variables hardcodeadas
+----------------------------------------------------
+
+**Future Work (ideas)**
+   - Smolagents integration: replace the current Field Marshal Agent with an LLM-based agent 
+         using the Smolagents library, enabling more complex strategic decision-making and high-level reasoning.
+   - Supply truck: implement a supply truck controlled directly by the Field Marshal (LLM), 
+         autonomously managing dynamic resupply of platoons based on the current state of the battlefield.
+   - Luftwaffe support: in case that we have enough time we would like to incorporate German air support as an additional unit
+         controlled by the Field Marshal, adding a new tactical dimension to combat.
+   - Map expansion: scale the grid from 25×25 to a larger size to accommodate new air and ground 
+         units, with procedural generation adapted to the new dimensions.
+   - Render improvements: enhance the Pygame interface with HP indicators over sprites, a 
+         real-time statistics panel, persistent smoke effects and per-agent status visualization.
+
+----------------------------------------------------
+
+**Authors**
+Name                    GitHub
+Alejandro Rodriguez     @alejandror5803
+Marco Antonio Benali    @marcobenali
+Gaspar Muñoz            @GasparMJ
