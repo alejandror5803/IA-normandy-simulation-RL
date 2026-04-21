@@ -29,6 +29,14 @@ class ObsNormWrapper(gym.ObservationWrapper):
         ])
 
     def observation(self, obs):
+        """
+        Analizes each observation of the peloton
+
+        obs: total observation
+
+        returns a list of normalized observations of the pelotons
+        
+        """
         safe_max = np.where(OBS_MAX_VALS == 0, 1.0, OBS_MAX_VALS)
         normalized = []
         for pel_obs in obs:
@@ -49,10 +57,13 @@ class EpisodeStatsWrapper(gym.Wrapper):
         self.ep_captures  = []
         self._ep_reward   = 0.0
 
+    # resets the wrapper
     def reset(self, **kwargs):
+
         self._ep_reward = 0.0
         return self.env.reset(**kwargs)
 
+    # monitorates and gives statistics of the wrapper
     def step(self, action):
         obs, rewards, terminated, truncated, info = self.env.step(action)
         self._ep_reward += sum(rewards)
@@ -76,6 +87,7 @@ class EpisodeStatsWrapper(gym.Wrapper):
 
         return obs, rewards, terminated, truncated, info
 
+    # gives an resume of all the rewards in the reinforcement learning
     def get_stats(self):
         if not self.ep_rewards:
             return {}
@@ -89,10 +101,12 @@ class EpisodeStatsWrapper(gym.Wrapper):
 
 
 class FogOfWarWrapper(gym.ObservationWrapper):
-    # Applies fog of war: if the nearest enemy is further than `visibility_range`
-    # cells, the enemy features in the obs vector are hidden (zeroed out).
-    # Historically grounded — WWII units had limited battlefield visibility,
-    # so the agent has to act without knowing where distant enemies are.
+    """
+     Applies fog of war: if the nearest enemy is further than `visibility_range`
+     cells, the enemy features in the obs vector are hidden (zeroed out).
+     Historically grounded — WWII units had limited battlefield visibility,
+     so the agent has to act without knowing where distant enemies are.
+    """
 
     ENEMY_NEARBY_IDX = 5
     ENEMY_DIST_IDX   = 6
@@ -114,13 +128,15 @@ class FogOfWarWrapper(gym.ObservationWrapper):
 
 
 class ActionMaskWrapper(gym.Wrapper):
-    # Computes which meta-actions are actually valid for each peloton right now
-    # and exposes that as 'action_masks' in info. Also fixes invalid actions before
-    # they reach the env, so the agent never wastes a step on something impossible.
-    #
-    # Rules:
-    #   META_ATTACK   (1) -> invalid if peloton has no ammo
-    #   META_RESUPPLY (3) -> invalid if peloton is not standing on a supply point
+    """
+     Computes which meta-actions are actually valid for each peloton right now
+     and exposes that as 'action_masks' in info. Also fixes invalid actions before
+     they reach the env, so the agent never wastes a step on something impossible.
+    
+     Rules:
+       META_ATTACK   (1) -> invalid if peloton has no ammo
+       META_RESUPPLY (3) -> invalid if peloton is not standing on a supply point
+    """
 
     META_ATTACK   = 1
     META_RESUPPLY = 3
@@ -153,11 +169,13 @@ class ActionMaskWrapper(gym.Wrapper):
             masks.append(mask)
         return masks
 
+    # resets the wrapper
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
         info['action_masks'] = self._compute_masks()
         return obs, info
 
+    # monitorates and gives statistics of the wrapper
     def step(self, actions):
         if self.redirect_invalid:
             masks = self._compute_masks()

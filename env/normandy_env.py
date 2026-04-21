@@ -1,11 +1,8 @@
-"""
-Entorno Gymnasium que implementa toda la lógica de la práctica.
-Controla 4 pelotones azules, enemigos rojos hardcodeados, puntos, recompensas.
-"""
 
+#Implementation of the librarys and imports from other modules their values
 import gymnasium as gym
 from gymnasium import spaces
-from gymnasium.wrappers import TimeLimit, ClipAction 
+from gymnasium.wrappers import TimeLimit
 import numpy as np
 import random
 import env.env_config as efg
@@ -46,10 +43,8 @@ P_STEP          = efg.P_STEP
 
 # observation vector size (one per blue peloton)
 OBS_SIZE = efg.OBS_SIZE
-# ============================================================================
-# CLASE PRINCIPAL DEL ENTORNO
-# ============================================================================
 
+# Creates a class which as implmented t
 class NormandyEnv(gym.Env):
 
     metadata = {"render_modes": ["human"], "render_fps": 4}
@@ -94,6 +89,7 @@ class NormandyEnv(gym.Env):
         self.fixed_blue_starts = [self._find_free_cell(0, 6, 18, 24) for _ in range(NUM_BLUE)]
         self.fixed_red_starts  = [self._find_free_cell(18, 24, 0, 6) for _ in range(NUM_RED)]
 
+        # initiates the peloton,their points, the points to captura and their steps
         self.blue_pelotons  = []
         self.red_pelotons   = []
         self.points         = {}
@@ -108,6 +104,7 @@ class NormandyEnv(gym.Env):
 
         self.reset()
 
+    # Each peloton consists of this caracteristics when it is created
     def _make_peloton(self, x, y, team, pid, hp=500, num_tanks=5):
         return {
             'id':        pid,
@@ -119,11 +116,14 @@ class NormandyEnv(gym.Env):
             'fuel':      500,
         }
 
+    
+    # verification of a specific position in passable (transitable is bool)
     def _is_passable(self, x, y):
         if not (0 <= x < MAP_SIZE and 0 <= y < MAP_SIZE):
             return False
         return self.map[y][x]['type'] not in IMPASSABLE
 
+    # trys no find an free cell randomly
     def _find_free_cell(self, x_min, x_max, y_min, y_max):
         for _ in range(500):
             x = random.randint(x_min, x_max)
@@ -138,10 +138,8 @@ class NormandyEnv(gym.Env):
                 return x, y
         return 0, 0
 
+    # resets the enviroment with the seed
     def reset(self, seed=None, options=None):
-        """
-        Reinicia el entorno.
-        """
         super().reset(seed=seed)
         if seed is not None:
             random.seed(seed)
@@ -169,6 +167,7 @@ class NormandyEnv(gym.Env):
         for i, (x, y) in enumerate(self.fixed_red_starts):
             self.red_pelotons.append(self._make_peloton(x, y, 'red', i, hp=300, num_tanks=3))
 
+        # resets both red and blue capture positions and capture states
         for ca in self.capture_agents:
             ca.reset_position_history()
 
@@ -176,9 +175,11 @@ class NormandyEnv(gym.Env):
         for ca in self.red_capture_agents:
             ca.reset_position_history()
 
+        # returns
         self.obs = self._get_obs()
         return self.obs, self._get_info()
 
+    # defines each step in relation of the reward 
     def step(self, commander_meta_actions):
         self.step_count += 1
         rewards     = [0.0] * NUM_BLUE
@@ -196,6 +197,7 @@ class NormandyEnv(gym.Env):
         cap_actions_taken = [None] * NUM_BLUE
         hit_confirmed     = [False] * NUM_BLUE
 
+        # if the vector of the snapshots is empty 
         for i, pel in enumerate(self.blue_pelotons):
             if pre[i] is None:
                 continue
@@ -207,25 +209,30 @@ class NormandyEnv(gym.Env):
             atk_a = self.attack_agents[i].choose_action(ps['atk_state'])
             def_a = self.defense_agents[i].choose_action(ps['enemy_nearby'], ps['cover_type'])
 
+            # it gives the value of where the nearest object is
             nearest_obj = self._nearest_uncaptured_point(pel)
+
+
             if nearest_obj is not None:
                 cap_a = self.capture_agents[i].choose_action(tuple(pel['pos']), tuple(nearest_obj['pos']))
             else:
                 cap_a = STAY
 
+            # defines each step what the decision was
             atk_actions_taken[i] = atk_a
             def_actions_taken[i] = def_a
             cap_actions_taken[i] = cap_a
 
-            # ONLY the delegated sub-agent executes its action
+            # ONLY the delegated sub-agent executes its action, depending if he want's to attack, defend or resupply
             if meta == META_ATTACK:
                 if atk_a == SHOOT and len(ps['enemies_in_range']) > 0:
-                    target = min(ps['enemies_in_range'],
-                                 key=lambda e: distance(pel['pos'], e['pos']))
+                    target = min(ps['enemies_in_range'], key=lambda e: distance(pel['pos'], e['pos']))
+                    
                     if distance(pel['pos'], target['pos']) <= ATTACK_RANGE:
                         old_tanks    = target['num_tanks']
                         target_cover = self.map[target['pos'][1]][target['pos'][0]]['cover']
                         dmg = do_attack(pel, target, target_cover, damage_per_tank=TIGER_DAMAGE)
+
                         if dmg > 0:
                             hit_confirmed[i] = True
                             rewards[i] += dmg * 0.5   # bigger signal per hit
@@ -506,11 +513,9 @@ class NormandyEnv(gym.Env):
         self.obs = self._get_obs()
 
         return self.obs, rewards, terminated, truncated, self._get_info()
-
-    # -------------------------------------------------------------------------
+    
     # helpers used inside step()
-    # -------------------------------------------------------------------------
-
+   
     def _snapshot_states(self):
         pre = []
         for i, pel in enumerate(self.blue_pelotons):
@@ -547,6 +552,7 @@ class NormandyEnv(gym.Env):
                     best = pd
         return best
 
+    # gives the red agent for their peloton the best captura point in distance
     def _nearest_uncaptured_point_red(self, pel):
         best      = None
         best_dist = 99999
@@ -557,7 +563,8 @@ class NormandyEnv(gym.Env):
                     best_dist = d
                     best = pd
         return best
-
+    
+    # captures and saves the actual states of the red pelotons in an specific moment
     def _snapshot_red_states(self):
         pre = []
         for i, red_pel in enumerate(self.red_pelotons):
@@ -584,6 +591,7 @@ class NormandyEnv(gym.Env):
             })
         return pre
 
+    # used to get the observations for the red agent
     def _build_red_obs_single(self, red_pel):
         nearest_blue, blue_dist = get_nearest_enemy(red_pel, self.blue_pelotons)
         if nearest_blue is None:
@@ -626,6 +634,7 @@ class NormandyEnv(gym.Env):
             1 if red_pel['ammo'] < 20 else 0,
         ], dtype=np.float32)
 
+     # it returns a list with the observations of the red agent
     def _get_red_obs(self):
         return [
             self._build_red_obs_single(red_pel) if red_pel['num_tanks'] > 0
@@ -633,10 +642,7 @@ class NormandyEnv(gym.Env):
             for red_pel in self.red_pelotons
         ]
 
-    # -------------------------------------------------------------------------
-    # observation, info, render
-    # -------------------------------------------------------------------------
-
+    # it returns a list with all the observations of the peloton
     def _get_obs(self):
         obs_list = []
         for pel in self.blue_pelotons:
@@ -689,6 +695,7 @@ class NormandyEnv(gym.Env):
 
         return obs_list
 
+    # get's general info in any moment of the battle
     def _get_info(self):
         return {
             'step':         self.step_count,
@@ -702,10 +709,9 @@ class NormandyEnv(gym.Env):
     def increase_episode(self):
         self.episode += 1
 
+    # renderers the py game
     def _render(self):
-        """
-        Renderizado simple con pygame (opcional).
-        """
+        
         if self.render_mode != "human":
             return
 
@@ -743,6 +749,7 @@ class NormandyEnv(gym.Env):
 
         pygame.display.set_caption(f"Normandy RL — ep {self.episode}  step {self.step_count}")
 
+        # the different colors to diferentiate the map on the screen
         terrain_colors = {
             'OPEN':   (100, 200, 100),
             'BUSH':   (50,  150,  50),
@@ -811,6 +818,7 @@ class NormandyEnv(gym.Env):
         pygame.display.flip()
         self.clock.tick(self.metadata["render_fps"])
     
+    # for the closing of the screen
     def close(self):
         if self.window is not None:
             import pygame
@@ -818,7 +826,7 @@ class NormandyEnv(gym.Env):
             self.window = None
 
 
-
+# implements the wrappers used in wrappers.py to the enviroment
 def make_env(render_mode=None, max_steps=500, fog_of_war=True, action_mask=True):
     from env.wrappers import FogOfWarWrapper, ActionMaskWrapper, EpisodeStatsWrapper
     env = NormandyEnv(render_mode=render_mode)
