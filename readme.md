@@ -137,32 +137,32 @@ When a platoon is hit, an animated explosion visual effect is displayed over its
 
 **Results**
 Terminal output during training
-![Terminal output](results/terminal.png)
+![Terminal output](readme_resources/terminal.png)
 
 Render image
-![Render example](results/render_ex.png)
+![Render example](readme_resources/render_ex.png)
 
 Training Performance:
 Displays the total reward per episode (light blue) along with its 50-episode moving average (dark blue), the episode length in steps, and the commander agent’s TD error. It can be observed that episodes shorten rapidly during the first 250 episodes, indicating that the agents learn to end the game efficiently.
-![Training performance](results/training_curves.png)
+![Training performance](readme_resources/training_curves.png)
 
 Epsilon Decay – Exploration vs Exploitation:
 Evolution of epsilon for each type of agent throughout training. The capture agent (orange) decays more slowly (decay = 0.9995) than the others (decay = 0.999), as it requires more exploration to learn navigation routes.
-![Epsilon decay](results/epsilon_decay.png)
+![Epsilon decay](readme_resources/epsilon_decay.png)
 
 Attack and Defense Agents – Q-values and Policy:
 The attack agent correctly learns to fire when enemies are within range.
 The defense agent learns to seek cover when enemies are nearby and to remain stationary when already in high cover (Wall).
-![Attack and defense agents](results/attack_defense_policy.png)
+![Attack and defense agents](readme_resources/attack_defense_policy.png)
 
 Capture Agent – Policy and State Values:
 At short distances, state values are positive, while at longer distances negative values increase, reflecting the penalty for moving away from the objective.
-![Capture agent policy](results/capture_agent_policy.png)
+![Capture agent policy](readme_resources/capture_agent_policy.png)
 
 Commander Agent – Policy and State Values:
 With normal ammunition and enemies within range, the agent learns to attack when HP is high and to resupply when it is low.
 With low ammunition, it always prioritizes capturing regardless of the threat.
-![Command agente policy](results/command_agent_policy.png)
+![Command agente policy](readme_resources/command_agent_policy.png)
 
 he plots are automatically generated at the end of training using metrics_and_plotter.py, which logs per episode the total reward, duration, TD error, captures, and the epsilon of each type of agent, and saves them in the folder configured in env_config.py ('PLOTS_SAVE_PATH').
 
