@@ -63,4 +63,4 @@ def train(episodes=5000, render_every=1000):
 
 
 if __name__ == "__main__":
-    train(episodes=2000, render_every=300)
+    train(episodes=10000, render_every=1000)

@@ -14,7 +14,7 @@ ATTACK_RANGE = cfg.ATTACK_RANGE
 
 class command_agent:
 
-    def __init__(self, lr=0.1, gamma=0.9, epsilon=0.3):
+    def __init__(self, lr=0.1, gamma=0.9, epsilon=0.6): # 0.3 epsilon inicial para fomentar exploración, luego se va decayendo
         """
         Inizialites the class o the capture agent
     

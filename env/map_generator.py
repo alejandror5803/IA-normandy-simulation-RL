@@ -1,6 +1,7 @@
 # implements libraries
 import random
 from collections import deque
+import env.env_config as cfg
 
 # Terrain types: cover value and movement penalization
 TERRAIN_TYPES = {
@@ -15,11 +16,12 @@ TERRAIN_TYPES = {
 # terrain types that block movement
 IMPASSABLE = {"WATER", "WALL"}
 
+HALF = cfg.MAP_SIZE // 2
 # Fixed positions of the capture points (col, row)
 FIXED_POINTS = {
-    "A": (2,  12),   # West flank
-    "B": (12, 12),   # Center (most valuable)
-    "C": (22, 12),   # East flank
+    "A": (4,  HALF),   # West flank
+    "B": (HALF, HALF),   # Center (most valuable)
+    "C": ( cfg.MAP_SIZE - 4, HALF),   # East flank
 }
 
 # Maximum supplies available at each capture point

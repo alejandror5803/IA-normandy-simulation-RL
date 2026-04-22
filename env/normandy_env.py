@@ -86,8 +86,13 @@ class NormandyEnv(gym.Env):
 
         # find starting positions ONCE and reuse every episode
         # same terrain + same starts = Q-tables can actually converge
-        self.fixed_blue_starts = [self._find_free_cell(0, 6, 18, 24) for _ in range(NUM_BLUE)]
-        self.fixed_red_starts  = [self._find_free_cell(18, 24, 0, 6) for _ in range(NUM_RED)]
+        #self.fixed_blue_starts = [self._find_free_cell(0, 6, 18, 24) for _ in range(NUM_BLUE)]
+        #self.fixed_red_starts  = [self._find_free_cell(18, 24, 0, 6) for _ in range(NUM_RED)]
+        
+        # fixed dynamic starts based on the MAP_SIZE, but always in the same positions every episode, the red team will spawn in the top middle and the blue team in the bottom left
+        self.fixed_blue_starts = [self._find_free_cell(0, 6, MAP_SIZE - 7, MAP_SIZE - 1) for _ in range(NUM_BLUE)]
+        #top middle
+        self.fixed_red_starts  = [self._find_free_cell(MAP_SIZE//2 - 3, MAP_SIZE//2 + 3, 0, 6) for _ in range(NUM_RED)]
 
         # initiates the peloton,their points, the points to captura and their steps
         self.blue_pelotons  = []
@@ -113,8 +118,8 @@ class NormandyEnv(gym.Env):
             'pos':       [x, y],
             'hp':        hp,
             'num_tanks': num_tanks,
-            'ammo':      100,
-            'fuel':      500,
+            'ammo':      efg.PELOTON_AMMO,
+            'fuel':      efg.PELOTON_FUEL,
         }
 
     
@@ -158,16 +163,18 @@ class NormandyEnv(gym.Env):
         self.captured   = {'A': False, 'B': False, 'C': False}
         self.step_count = 0
         self.active_explosions = []
+        self.capture_countdown      = None  # steps remaining in overtime (None = not active)
+        self.capture_countdown_team = None  # 'blue' or 'red' — who triggered it
 
         # same starting positions every episode (set once in __init__)
         self.blue_pelotons = []
         for i, (x, y) in enumerate(self.fixed_blue_starts):
-            self.blue_pelotons.append(self._make_peloton(x, y, 'blue', i, hp=700, num_tanks=7))
+            self.blue_pelotons.append(self._make_peloton(x, y, 'blue', i, hp=efg.TIGER_PELOTON_HP, num_tanks=efg.TIGER_PELOTON_HP // 100))
 
         # reds are 3:1 in numbers but weaker per peloton (300hp, 3 tanks)
         self.red_pelotons = []
         for i, (x, y) in enumerate(self.fixed_red_starts):
-            self.red_pelotons.append(self._make_peloton(x, y, 'red', i, hp=300, num_tanks=3))
+            self.red_pelotons.append(self._make_peloton(x, y, 'red', i, hp=efg.SHERMAN_PELOTON_HP, num_tanks=efg.SHERMAN_PELOTON_HP // 100))
 
         # resets both red and blue capture positions and capture states
         for ca in self.capture_agents:
@@ -479,23 +486,7 @@ class NormandyEnv(gym.Env):
 
         terminated = False
 
-        # Blue wins by capturing all objectives
-        if all(self.captured.values()):
-            terminated = True
-            for i in range(NUM_BLUE):
-                rewards[i] += R_WIN
-            for i in range(NUM_RED):
-                red_rewards[i] += P_LOSE
-
-        # Red wins by capturing all objectives
-        if all(self.red_captured.values()):
-            terminated = True
-            for i in range(NUM_RED):
-                red_rewards[i] += R_WIN
-            for i in range(NUM_BLUE):
-                rewards[i] += P_LOSE
-
-        # Red wins if all blue units destroyed
+        # instant win — one side wiped out completely
         if all_dead(self.blue_pelotons):
             terminated = True
             for i in range(NUM_BLUE):
@@ -503,13 +494,46 @@ class NormandyEnv(gym.Env):
             for i in range(NUM_RED):
                 red_rewards[i] += R_WIN
 
-        # Blue wins if all red units destroyed
         if all_dead(self.red_pelotons):
             terminated = True
             for i in range(NUM_BLUE):
                 rewards[i] += R_WIN
             for i in range(NUM_RED):
                 red_rewards[i] += P_LOSE
+
+        if not terminated:
+            # start overtime the first time a team holds all 3 points
+            if all(self.captured.values()) and self.capture_countdown is None:
+                self.capture_countdown      = efg.CAPTURE_OVERTIME
+                self.capture_countdown_team = 'blue'
+            if all(self.red_captured.values()) and self.capture_countdown is None:
+                self.capture_countdown      = efg.CAPTURE_OVERTIME
+                self.capture_countdown_team = 'red'
+
+            if self.capture_countdown is not None:
+                if self.capture_countdown_team == 'blue':
+                    still_holds = all(self.captured.values())
+                else:
+                    still_holds = all(self.red_captured.values())
+
+                if not still_holds:
+                    # enemy reconquered at least one point — cancel overtime
+                    self.capture_countdown      = None
+                    self.capture_countdown_team = None
+                else:
+                    self.capture_countdown -= 1
+                    if self.capture_countdown <= 0:
+                        terminated = True
+                        if self.capture_countdown_team == 'blue':
+                            for i in range(NUM_BLUE):
+                                rewards[i] += R_WIN
+                            for i in range(NUM_RED):
+                                red_rewards[i] += P_LOSE
+                        else:
+                            for i in range(NUM_RED):
+                                red_rewards[i] += R_WIN
+                            for i in range(NUM_BLUE):
+                                rewards[i] += P_LOSE
 
         truncated = False
 
@@ -730,12 +754,13 @@ class NormandyEnv(gym.Env):
     # get's general info in any moment of the battle
     def _get_info(self):
         return {
-            'step':         self.step_count,
-            'blue_alive':   sum(1 for p in self.blue_pelotons if p['num_tanks'] > 0),
-            'red_alive':    sum(1 for p in self.red_pelotons  if p['num_tanks'] > 0),
-            'captured':     self.captured.copy(),
-            'red_captured': self.red_captured.copy(),
-            'red_eps':      self.red_command_agents[0].epsilon,
+            'step':              self.step_count,
+            'blue_alive':        sum(1 for p in self.blue_pelotons if p['num_tanks'] > 0),
+            'red_alive':         sum(1 for p in self.red_pelotons  if p['num_tanks'] > 0),
+            'captured':          self.captured.copy(),
+            'red_captured':      self.red_captured.copy(),
+            'red_eps':           self.red_command_agents[0].epsilon,
+            'capture_countdown': self.capture_countdown,
         }
 
     # goes to next episode
@@ -758,16 +783,16 @@ class NormandyEnv(gym.Env):
             print("pygame not installed, cannot render")
             return
 
-        cell_size = 750 // MAP_SIZE
+        cell_size = 900 // MAP_SIZE 
 
         if self.window is None:
             pygame.init()
-            self.window = pygame.display.set_mode((750, 750))
+            self.window = pygame.display.set_mode((900, 900)) # 750x750 pixels window
             self.clock  = pygame.time.Clock()
             # try to load map background image (optional)
             try:
                 bg = pygame.image.load("resources/mapaNormandia.png").convert()
-                self.map_bg_surface = pygame.transform.scale(bg, (750, 750))
+                self.map_bg_surface = pygame.transform.scale(bg, (900, 900))
             except Exception:
                 self.map_bg_surface = None
             # load unit images once — reuse every step instead of re-loading every frame
@@ -800,7 +825,7 @@ class NormandyEnv(gym.Env):
             self.window.fill((0, 0, 0))
 
         # terrain grid — semi-transparent when background image is present so both are visible
-        terrain_overlay = pygame.Surface((750, 750), pygame.SRCALPHA)
+        terrain_overlay = pygame.Surface((900, 900), pygame.SRCALPHA)
         cell_alpha = 110 if self.map_bg_surface else 255
         for row in range(MAP_SIZE):
             for col in range(MAP_SIZE):
@@ -821,7 +846,7 @@ class NormandyEnv(gym.Env):
         for name, p in self.points.items():
             cx = p['pos'][0] * cell_size + cell_size // 2
             cy = p['pos'][1] * cell_size + cell_size // 2
-            color = (0, 200, 255) if self.captured[name] else (255, 215, 0)
+            color = (0, 200, 255) if self.captured[name] else (255, 215, 0) # yellow when free, cyan when captured
             pygame.draw.circle(self.window, color, (cx, cy), cell_size // 3)
             lbl = font_small.render(name, True, (0, 0, 0))
             self.window.blit(lbl, (cx - 4, cy - 6))

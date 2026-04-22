@@ -20,7 +20,7 @@ Artificial Intelligence course project. Multi-agent tactical simulation of the B
 
 ## Description
 
-IA-Normandy is a tactical simulation of the Battle of Normandy (and later the Battle of Caen) in a 2D grid environment of 25×25 cells. The project models a historically accurate numerical imbalance: the blue team (Germans, Tigers) starts at a 1:3 disadvantage against the red team (Allies, Shermans), but compensates with greater armor and firepower per unit.
+IA-Normandy is a tactical simulation of the Battle of Normandy (and later the Battle of Caen) in a 2D grid environment of 40×40 cells. The project models a historically accurate numerical imbalance: the blue team (Germans, Tigers) starts at a 1:3 disadvantage against the red team (Allies, Shermans), but compensates with greater armor and firepower per unit.
 
 The objectives of the blue team are:
 - Capture and hold points of interest A, B, and C (with B being the most strategically valuable).
@@ -44,7 +44,7 @@ The system is organized into two hierarchical levels:
 
 ### Map and Terrain
 
-The environment is a 25×25 grid rendered with Pygame, using `mapaNormandia.png` as the background. The map and unit spawn positions are generated once and remain fixed across all episodes to allow Q-tables to converge to a stable policy.
+The environment is a 40×40 grid rendered with Pygame, using `mapaNormandia.png` as the background. The map and unit spawn positions are generated once and remain fixed across all episodes to allow Q-tables to converge to a stable policy.
 
 Sample of the map used:
 
@@ -71,7 +71,7 @@ Sample of the map used:
 
 | Team           | Platoons | Tanks/Platoon | HP/Platoon | Image                                    |
 |----------------|----------|---------------|------------|------------------------------------------|
-| Blue (Tigers)  | 4        | 7             | 700        | ![Tiger](resources/tiger.png)            |
+| Blue (Tigers)  | 4        | 6             | 600        | ![Tiger](resources/tiger.png)            |
 | Red (Shermans) | 12 (3:1) | 3             | 300        | ![Sherman](resources/sherman.png)        |
 
 When HP drops below 100, a tank is destroyed and the platoon's firepower decreases proportionally.
@@ -225,7 +225,7 @@ The plots are automatically generated at the end of training using `metrics_and_
 - **Smolagents integration:** Replace the current Field Marshal Agent with an LLM-based agent using the Smolagents library, enabling more complex strategic decision-making and high-level reasoning.
 - **Supply truck:** Implement a supply truck controlled directly by the Field Marshal (LLM), autonomously managing dynamic resupply of platoons based on the current state of the battlefield.
 - **Luftwaffe support:** In case we have enough time, incorporate German air support as an additional unit controlled by the Field Marshal, adding a new tactical dimension to combat.
-- **Map expansion:** Scale the grid from 25×25 to a larger size to accommodate new air and ground units, with procedural generation adapted to the new dimensions.
+- **Map expansion:** Scale the grid from 40×40 to a larger size to accommodate new air and ground units, with procedural generation adapted to the new dimensions.
 - **Render improvements:** Enhance the Pygame interface with HP indicators over sprites, a real-time statistics panel, persistent smoke effects and per-agent status visualization.
 
 ---
