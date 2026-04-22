@@ -66,7 +66,7 @@ Red (Shermans)   12(3:1)                 3                 300       ![Sherman](
 When HP drops below 100, a tank is destroyed and the platoon’s firepower decreases proportionally.
 
 **Commander Meta-Actions (per platoon)**
-Meta-Acción           Code              Delegated Sub-Agent
+Meta-Action           Code              Delegated Sub-Agent
 META_CAPTURE           0                Capture Agent – Moves toward the objective
 META_ATTACK            1                Attack Agent – Decides whether to fire
 META_DEFENSE           2                Defense Agent – Seeks cover
@@ -92,7 +92,7 @@ Each platoon receives a vector of 16 integer values in the range [0–9]:
 15    low_ammo       0-1      Critical ammo flag (<20)
 
 **Available actions (per platoon)**
-Acción            Código            Descripción
+Action            Code              Description
 MOVE_NORTH          0               Move north
 MOVE_SOUTH          1               Move south
 MOVE_EAST           2               Move east
