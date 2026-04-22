@@ -379,19 +379,23 @@ class NormandyEnv(gym.Env):
 
         # BLUE SUB-AGENTS LEARN (after red attacked, so got_hit is accurate)
         for i, pel in enumerate(self.blue_pelotons):
-            if pre[i] is None:
+            if pre[i] is None: # Skip destroyed platoons (no learning update)
                 continue
 
             ps      = pre[i]
-            got_hit = pel['hp'] < blue_hp_before_red[i]
+            got_hit = pel['hp'] < blue_hp_before_red[i]  # Check if platoon took damage after red attack
 
+            # Get new enemies in range and next attack state
             new_in_range   = get_enemies_in_range(pel, self.red_pelotons, ATTACK_RANGE)
             next_atk_state = self.attack_agents[i].get_state(new_in_range)
+
+            # Compute reward based on previous state, action taken, and hit outcome
             atk_reward     = self.attack_agents[i].compute_reward(
                 ps['atk_state'], atk_actions_taken[i], hit_confirmed[i]
-            )
+            )  # Compute reward based on previous state, action taken, and hit outcome
             self.attack_agents[i].update(ps['atk_state'], atk_actions_taken[i], atk_reward, next_atk_state)
 
+            # Compute next enemy proximity
             nearest_now, dist_now = get_nearest_enemy(pel, self.red_pelotons)
             next_enemy_nearby = 1 if (nearest_now is not None and dist_now <= 4) else 0
             next_cover_val    = self.map[pel['pos'][1]][pel['pos'][0]]['cover']
@@ -405,6 +409,7 @@ class NormandyEnv(gym.Env):
                 next_enemy_nearby, next_cover_type
             )
 
+            # Find nearest uncaptured objective
             nearest_obj = self._nearest_uncaptured_point(pel)
             if nearest_obj is not None:
                 old_pos_t = tuple(ps['pos'])
@@ -422,9 +427,11 @@ class NormandyEnv(gym.Env):
             if pre_red[i] is None:
                 continue
 
+            # Check if red platoon took damage
             psr     = pre_red[i]
             got_hit_red = red_pel['hp'] < red_hp_before_blue[i]
 
+              #  Attack agent (red) 
             new_blues_in_range = get_enemies_in_range(red_pel, self.blue_pelotons, ATTACK_RANGE)
             next_atk_state_r   = self.red_attack_agents[i].get_state(new_blues_in_range)
             atk_reward_r       = self.red_attack_agents[i].compute_reward(
@@ -432,6 +439,7 @@ class NormandyEnv(gym.Env):
             )
             self.red_attack_agents[i].update(psr['atk_state'], red_atk_actions[i], atk_reward_r, next_atk_state_r)
 
+            #  Defense agent (red) 
             nearest_blue_now, dist_blue_now = get_nearest_enemy(red_pel, self.blue_pelotons)
             next_enemy_nearby_r = 1 if (nearest_blue_now is not None and dist_blue_now <= 4) else 0
             next_cover_val_r    = self.map[red_pel['pos'][1]][red_pel['pos'][0]]['cover']
@@ -463,6 +471,7 @@ class NormandyEnv(gym.Env):
             )
             self.red_command_agents[i].update(psr['obs_vec'], red_meta_taken[i], cmd_r, new_obs_r)
 
+        # Step penalty (encourage efficiency)
         for i in range(NUM_BLUE):
             rewards[i] += P_STEP
         for i in range(NUM_RED):
@@ -470,6 +479,7 @@ class NormandyEnv(gym.Env):
 
         terminated = False
 
+        # Blue wins by capturing all objectives
         if all(self.captured.values()):
             terminated = True
             for i in range(NUM_BLUE):
@@ -477,6 +487,7 @@ class NormandyEnv(gym.Env):
             for i in range(NUM_RED):
                 red_rewards[i] += P_LOSE
 
+        # Red wins by capturing all objectives
         if all(self.red_captured.values()):
             terminated = True
             for i in range(NUM_RED):
@@ -484,6 +495,7 @@ class NormandyEnv(gym.Env):
             for i in range(NUM_BLUE):
                 rewards[i] += P_LOSE
 
+        # Red wins if all blue units destroyed
         if all_dead(self.blue_pelotons):
             terminated = True
             for i in range(NUM_BLUE):
@@ -491,6 +503,7 @@ class NormandyEnv(gym.Env):
             for i in range(NUM_RED):
                 red_rewards[i] += R_WIN
 
+        # Blue wins if all red units destroyed
         if all_dead(self.red_pelotons):
             terminated = True
             for i in range(NUM_BLUE):
@@ -500,6 +513,7 @@ class NormandyEnv(gym.Env):
 
         truncated = False
 
+        # Decay exploration (epsilon) after each episode
         if terminated or truncated:
             for i in range(NUM_BLUE):
                 self.attack_agents[i].decay_epsilon(decay_rate=0.999,  min_epsilon=0.05)
@@ -514,7 +528,7 @@ class NormandyEnv(gym.Env):
         if self.render_mode == "human":
             self._render()
 
-        self.obs = self._get_obs()
+        self.obs = self._get_obs() # Compute next observation
 
         return self.obs, rewards, terminated, truncated, self._get_info()
     
@@ -545,7 +559,9 @@ class NormandyEnv(gym.Env):
             })
         return pre
 
+    
     def _nearest_uncaptured_point(self, pel):
+        # Find closest uncaptured objective for blue team
         best      = None
         best_dist = 99999
         for name, pd in self.points.items():
@@ -556,8 +572,9 @@ class NormandyEnv(gym.Env):
                     best = pd
         return best
 
-    # gives the red agent for their peloton the best captura point in distance
+   
     def _nearest_uncaptured_point_red(self, pel):
+         # Find closest uncaptured objective for red team
         best      = None
         best_dist = 99999
         for name, pd in self.points.items():
@@ -579,36 +596,43 @@ class NormandyEnv(gym.Env):
             blues_in_range = get_enemies_in_range(red_pel, self.blue_pelotons, ATTACK_RANGE)
             atk_state = self.red_attack_agents[i].get_state(blues_in_range)
 
+            # Compute proximity to nearest blue
             nearest_blue, nearest_dist = get_nearest_enemy(red_pel, self.blue_pelotons)
             enemy_nearby = 1 if (nearest_blue is not None and nearest_dist <= 4) else 0
             cover_val    = self.map[red_pel['pos'][1]][red_pel['pos'][0]]['cover']
             cover_type   = get_cover_type_int(cover_val)
 
+            # Store state information
             pre.append({
-                'hp':               red_pel['hp'],
-                'pos':              list(red_pel['pos']),
-                'atk_state':        atk_state,
-                'enemy_nearby':     enemy_nearby,
-                'cover_type':       cover_type,
-                'enemies_in_range': blues_in_range,
-                'obs_vec':          self._build_red_obs_single(red_pel),
-            })
+            'hp':               red_pel['hp'],                        # current health
+            'pos':              list(red_pel['pos']),                 # position
+            'atk_state':        atk_state,                            # attack state encoding
+            'enemy_nearby':     enemy_nearby,                         # proximity flag
+            'cover_type':       cover_type,                           # terrain type
+            'enemies_in_range': blues_in_range,                       # attackable enemies
+            'obs_vec':          self._build_red_obs_single(red_pel),  # full observation vector
+        })
+
         return pre
 
-    # used to get the observations for the red agent
+    # Used to get the observations for the red agent
     def _build_red_obs_single(self, red_pel):
         nearest_blue, blue_dist = get_nearest_enemy(red_pel, self.blue_pelotons)
         if nearest_blue is None:
-            enemy_nearby       = 0
+            enemy_nearby       = 0 # no enemies alive
             enemy_dist_clamped = 9
         else:
             enemy_nearby       = 1 if blue_dist <= 4 else 0
             enemy_dist_clamped = min(blue_dist, 9)
 
+        # Objective features
         nearest_obj = self._nearest_uncaptured_point_red(red_pel)
         if nearest_obj is not None:
+
+            # Relative position to objective
             obj_dx     = nearest_obj['pos'][0] - red_pel['pos'][0]
             obj_dy     = nearest_obj['pos'][1] - red_pel['pos'][1]
+              # Direction encoding (0 = same, 1 = positive, 2 = negative)
             obj_dx_dir = 0 if obj_dx == 0 else (1 if obj_dx > 0 else 2)
             obj_dy_dir = 0 if obj_dy == 0 else (1 if obj_dy > 0 else 2)
             obj_dist   = min(abs(obj_dx) + abs(obj_dy), 9)
@@ -617,25 +641,26 @@ class NormandyEnv(gym.Env):
             obj_dy_dir = 0
             obj_dist   = 0
 
+          # Get cover type at current position
         cover_type = get_cover_type_int(self.map[red_pel['pos'][1]][red_pel['pos'][0]]['cover'])
 
         return np.array([
-            red_pel['hp'] // 100,
-            red_pel['fuel'] // 20,
-            red_pel['ammo'] // 20,
-            red_pel['num_tanks'],
-            cover_type,
-            enemy_nearby,
-            enemy_dist_clamped,
-            1 if self.red_captured['A'] else 0,
-            1 if self.red_captured['B'] else 0,
-            1 if self.red_captured['C'] else 0,
-            obj_dx_dir,
-            obj_dy_dir,
-            obj_dist,
-            red_pel['pos'][0] // 5,
-            red_pel['pos'][1] // 5,
-            1 if red_pel['ammo'] < 20 else 0,
+            red_pel['hp'] // 100,                # 0–5  HP scaled in hundreds
+            red_pel['fuel'] // 20,               # 0–5  fuel level (coarse discretization)
+            red_pel['ammo'] // 20,               # 0–5  ammo level (coarse discretization)
+            red_pel['num_tanks'],                # 0–5  number of tanks remaining
+            cover_type,                          # 0–2  cover type at current position
+            enemy_nearby,                        # 0–1  whether an enemy is within 4 cells
+            enemy_dist_clamped,                  # 0–9  distance to nearest enemy (clamped)
+            1 if self.red_captured['A'] else 0,  # 0–1  objective A captured
+            1 if self.red_captured['B'] else 0,  # 0–1  objective B captured
+            1 if self.red_captured['C'] else 0,  # 0–1  objective C captured
+            obj_dx_dir,                          # 0–2  direction to nearest objective (x-axis)
+            obj_dy_dir,                          # 0–2  direction to nearest objective (y-axis)
+            obj_dist,                            # 0–9  distance to nearest objective
+            red_pel['pos'][0] // 5,              # 0–4  map sector (x coordinate)
+            red_pel['pos'][1] // 5,              # 0–4  map sector (y coordinate)
+            1 if red_pel['ammo'] < 20 else 0,    # 0–1  low ammo indicator
         ], dtype=np.float32)
 
      # it returns a list with the observations of the red agent
@@ -648,28 +673,31 @@ class NormandyEnv(gym.Env):
 
     # it returns a list with all the observations of the peloton
     def _get_obs(self):
+        # Build observation vector for each blue platoon
         obs_list = []
+
         for pel in self.blue_pelotons:
-            if pel['num_tanks'] <= 0:
+            if pel['num_tanks'] <= 0:  # If platoon is destroyed, return a zero observation
                 obs_list.append(np.zeros(OBS_SIZE, dtype=np.float32))
                 continue
-
+            
+            # Get closest enemy platoon and its distance
             nearest_enemy, enemy_dist = get_nearest_enemy(pel, self.red_pelotons)
             if nearest_enemy is None:
-                enemy_nearby       = 0
+                enemy_nearby       = 0  # No enemies alive → default values
                 enemy_dist_clamped = 9
-            else:
+            else:  # Binary flag if enemy is within engagement range (<= 4 cells)
                 enemy_nearby       = 1 if enemy_dist <= 4 else 0
                 enemy_dist_clamped = min(enemy_dist, 9)
 
-            nearest_obj = self._nearest_uncaptured_point(pel)
-            if nearest_obj is not None:
+            nearest_obj = self._nearest_uncaptured_point(pel)   # Find nearest uncaptured objective
+            if nearest_obj is not None:   # Relative position to objective (grid space)
                 obj_dx     = nearest_obj['pos'][0] - pel['pos'][0]
                 obj_dy     = nearest_obj['pos'][1] - pel['pos'][1]
                 obj_dx_dir = 0 if obj_dx == 0 else (1 if obj_dx > 0 else 2)
                 obj_dy_dir = 0 if obj_dy == 0 else (1 if obj_dy > 0 else 2)
                 obj_dist   = min(abs(obj_dx) + abs(obj_dy), 9)
-            else:
+            else:   # No objectives remaining
                 obj_dx_dir = 0
                 obj_dy_dir = 0
                 obj_dist   = 0
@@ -710,6 +738,7 @@ class NormandyEnv(gym.Env):
             'red_eps':      self.red_command_agents[0].epsilon,
         }
 
+    # goes to next episode
     def increase_episode(self):
         self.episode += 1
 
@@ -776,8 +805,13 @@ class NormandyEnv(gym.Env):
         for row in range(MAP_SIZE):
             for col in range(MAP_SIZE):
                 cell  = self.map[row][col]
+
+                # Get terrain color 
                 r, g, b = terrain_colors.get(cell['type'], (200, 200, 200))
+
+                # Compute cell rectangle in screen coordinates
                 rect  = pygame.Rect(col * cell_size, row * cell_size, cell_size, cell_size)
+                # Fill cell and draw a subtle border
                 pygame.draw.rect(terrain_overlay, (r, g, b, cell_alpha), rect)
                 pygame.draw.rect(terrain_overlay, (0, 0, 0, 60), rect, 1)
         self.window.blit(terrain_overlay, (0, 0))
@@ -823,21 +857,30 @@ class NormandyEnv(gym.Env):
         # draw explosion effects on hit tanks
         still_alive = []
         for exp in self.active_explosions:
+            # Convert grid position to pixel center
             ex = exp['pos'][0] * cell_size + cell_size // 2
             ey = exp['pos'][1] * cell_size + cell_size // 2
+
+            # Fade-out effect based on remaining frames
             alpha = int(220 * exp['frames_left'] / 4)
             radius = cell_size // 2 + 4
             exp_surf = pygame.Surface((cell_size * 3, cell_size * 3), pygame.SRCALPHA)
             center = (cell_size + cell_size // 2, cell_size + cell_size // 2)
+
+            # Draw explosion layers (outer → inner)
             pygame.draw.circle(exp_surf, (255, 200, 0, alpha),            center, radius)
             pygame.draw.circle(exp_surf, (255, 80,  0, min(255, alpha + 40)), center, radius // 2)
             pygame.draw.circle(exp_surf, (255, 255, 200, min(255, alpha + 80)), center, radius // 4)
             self.window.blit(exp_surf, (ex - cell_size - cell_size // 2, ey - cell_size - cell_size // 2))
-            exp['frames_left'] -= 1
+            
+            exp['frames_left'] -= 1 # decrease lifetime
+
+            # keep explosion if still active
             if exp['frames_left'] > 0:
                 still_alive.append(exp)
         self.active_explosions = still_alive
 
+        # final render
         pygame.display.flip()
         self.clock.tick(self.metadata["render_fps"])
     
@@ -851,7 +894,8 @@ class NormandyEnv(gym.Env):
 
 # implements the wrappers used in wrappers.py to the enviroment
 def make_env(render_mode=None, max_steps=500, fog_of_war=True, action_mask=True, render_every=efg.RENDER_EVERY):
-    from env.wrappers import FogOfWarWrapper, ActionMaskWrapper, EpisodeStatsWrapper
+    from env.wrappers import FogOfWarWrapper, ActionMaskWrapper, EpisodeStatsWrapper # implementing libraries
+    
     env = NormandyEnv(render_mode=render_mode, render_every=render_every)
     if fog_of_war:
         env = FogOfWarWrapper(env)
@@ -859,6 +903,6 @@ def make_env(render_mode=None, max_steps=500, fog_of_war=True, action_mask=True,
         env = ActionMaskWrapper(env)
     env = TimeLimit(env, max_episode_steps=max_steps)
     env = EpisodeStatsWrapper(env)
-    return env
+    return env # Creating all the wrappers in relation with wrappers
 
     
