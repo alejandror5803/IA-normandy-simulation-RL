@@ -23,8 +23,8 @@ R_CAPTURE_B     = 300
 R_DESTROY_ENEMY = 200   # higher to make killing enemies worth delegating to attack_agent
 R_RESUPPLY      = 10
 R_WIN           = 1000
-P_LOSE          = -2000 # -500
-P_STEP          = -10 # -0.1
+P_LOSE          = -1000 # symmetric magnitude with R_WIN to avoid high-variance returns
+P_STEP          = -1.0  # small relative to capture/win rewards so shaping signals remain visible
 
 # observation vector size (one per blue peloton)
 OBS_SIZE = 16

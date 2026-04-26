@@ -1,1 +1,5 @@
-*.pyc
+/agents/__pycache__
+/env/__pycache__
+*.zip
+/utils/__pycache__
+/results
