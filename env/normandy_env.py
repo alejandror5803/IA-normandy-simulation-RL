@@ -768,6 +768,7 @@ class NormandyEnv(gym.Env):
         self.episode += 1
 
     # renderers the py game
+    # renderers the py game
     def _render(self):
         
         if self.render_mode != "human":
@@ -783,11 +784,12 @@ class NormandyEnv(gym.Env):
             print("pygame not installed, cannot render")
             return
 
-        cell_size = 900 // MAP_SIZE 
+        PANEL_WIDTH = 220   # side stats panel width in pixels
+        cell_size   = 900 // MAP_SIZE
 
         if self.window is None:
             pygame.init()
-            self.window = pygame.display.set_mode((900, 900)) # 750x750 pixels window
+            self.window = pygame.display.set_mode((900 + PANEL_WIDTH, 900))
             self.clock  = pygame.time.Clock()
             # try to load map background image (optional)
             try:
@@ -804,6 +806,8 @@ class NormandyEnv(gym.Env):
             except Exception:
                 self.tiger_img   = None
                 self.sherman_img = None
+            # initialize smoke particle list
+            self.smoke_particles = []
 
         pygame.event.pump()   # keeps the OS from marking the window as "not responding"
         pygame.display.set_caption(f"Normandy RL — ep {self.episode}  step {self.step_count}")
@@ -818,94 +822,274 @@ class NormandyEnv(gym.Env):
             'WATER':  (50,  100, 200),
         }
 
-        # background: image if available, black otherwise
+        # meta-action labels for per-agent status display
+        META_LABELS = {0: "CAPTURE", 1: "ATTACK", 2: "DEFENSE", 3: "RESUPPLY"}
+        META_COLORS = {
+            0: (255, 220,  50),   # yellow — moving
+            1: (255,  80,  80),   # red    — shooting
+            2: (80,  160, 255),   # blue   — taking cover
+            3: (80,  220, 120),   # green  — resupplying
+        }
+
+        # ── background: image if available, black otherwise ──────────────────
         if self.map_bg_surface:
             self.window.blit(self.map_bg_surface, (0, 0))
         else:
             self.window.fill((0, 0, 0))
 
-        # terrain grid — semi-transparent when background image is present so both are visible
+        # fill the stats panel area with a dark background
+        pygame.draw.rect(self.window, (18, 22, 30), pygame.Rect(900, 0, PANEL_WIDTH, 900))
+
+        # ── terrain grid ─────────────────────────────────────────────────────
         terrain_overlay = pygame.Surface((900, 900), pygame.SRCALPHA)
         cell_alpha = 110 if self.map_bg_surface else 255
         for row in range(MAP_SIZE):
             for col in range(MAP_SIZE):
                 cell  = self.map[row][col]
-
-                # Get terrain color 
                 r, g, b = terrain_colors.get(cell['type'], (200, 200, 200))
-
-                # Compute cell rectangle in screen coordinates
                 rect  = pygame.Rect(col * cell_size, row * cell_size, cell_size, cell_size)
-                # Fill cell and draw a subtle border
                 pygame.draw.rect(terrain_overlay, (r, g, b, cell_alpha), rect)
                 pygame.draw.rect(terrain_overlay, (0, 0, 0, 60), rect, 1)
         self.window.blit(terrain_overlay, (0, 0))
 
-        # draw capture points (yellow = free, cyan = captured)
+        # ── capture points ───────────────────────────────────────────────────
         font_small = pygame.font.Font(None, 18)
         for name, p in self.points.items():
             cx = p['pos'][0] * cell_size + cell_size // 2
             cy = p['pos'][1] * cell_size + cell_size // 2
-            color = (0, 200, 255) if self.captured[name] else (255, 215, 0) # yellow when free, cyan when captured
+            color = (0, 200, 255) if self.captured[name] else (255, 215, 0)
             pygame.draw.circle(self.window, color, (cx, cy), cell_size // 3)
             lbl = font_small.render(name, True, (0, 0, 0))
             self.window.blit(lbl, (cx - 4, cy - 6))
 
-        for pel in self.blue_pelotons:
-            if pel['num_tanks'] > 0:
-                xp = pel['pos'][0] * cell_size
-                yp = pel['pos'][1] * cell_size
-                if self.tiger_img:
-                    self.window.blit(self.tiger_img, (xp, yp))
-                else:
-                    pygame.draw.rect(self.window, (30, 80, 220), pygame.Rect(xp, yp, cell_size, cell_size))
-                txt = font_small.render(str(pel['num_tanks']), True, (255, 255, 255))
-                self.window.blit(txt, (xp + 2, yp + 2))
+        # ── smoke particles (persistent, spawn on damaged pelotons) ──────────
+        # spawn new smoke on pelotons that have lost tanks (hp < max)
+        all_pelotons = self.blue_pelotons + self.red_pelotons
+        for pel in all_pelotons:
+            if pel['num_tanks'] <= 0:
+                continue
+            max_hp   = efg.TIGER_PELOTON_HP if pel['team'] == 'blue' else efg.SHERMAN_PELOTON_HP
+            dmg_frac = 1.0 - (pel['hp'] / max_hp)
+            # more damage → more smoke, more often
+            if dmg_frac > 0.2 and random.random() < dmg_frac * 0.6:
+                import random as _rnd
+                self.smoke_particles.append({
+                    'x':     pel['pos'][0] * cell_size + cell_size // 2 + _rnd.randint(-4, 4),
+                    'y':     pel['pos'][1] * cell_size + _rnd.randint(-4, 2),
+                    'life':  _rnd.randint(12, 24),
+                    'max':   24,
+                    'r':     _rnd.randint(cell_size // 4, cell_size // 2),
+                    'dx':    _rnd.uniform(-0.3, 0.3),
+                    'dy':    _rnd.uniform(-0.8, -0.3),
+                })
 
-        for pel in self.red_pelotons:
-            if pel['num_tanks'] > 0:
-                xp = pel['pos'][0] * cell_size
-                yp = pel['pos'][1] * cell_size
-                if self.sherman_img:
-                    self.window.blit(self.sherman_img, (xp, yp))
-                else:
-                    pygame.draw.rect(self.window, (200, 30, 30), pygame.Rect(xp, yp, cell_size, cell_size))
+        # draw and age smoke particles
+        smoke_surf   = pygame.Surface((900, 900), pygame.SRCALPHA)
+        alive_smoke  = []
+        for sp in self.smoke_particles:
+            fade  = sp['life'] / sp['max']
+            alpha = int(120 * fade)
+            gray  = int(160 + 60 * fade)
+            pygame.draw.circle(smoke_surf, (gray, gray, gray, alpha),
+                               (int(sp['x']), int(sp['y'])), max(2, sp['r']))
+            sp['x']    += sp['dx']
+            sp['y']    += sp['dy']
+            sp['life'] -= 1
+            if sp['life'] > 0:
+                alive_smoke.append(sp)
+        self.smoke_particles = alive_smoke
+        self.window.blit(smoke_surf, (0, 0))
 
-        # episode + step HUD (top-left, dark background so it's always readable)
+        # ── blue pelotons ────────────────────────────────────────────────────
+        font_tiny = pygame.font.Font(None, 14)
         font_hud  = pygame.font.Font(None, 28)
-        hud_text  = f"ep {self.episode}   step {self.step_count}"
-        hud_surf  = font_hud.render(hud_text, True, (255, 255, 255))
-        hud_rect  = pygame.Rect(4, 4, hud_surf.get_width() + 12, 28)
-        pygame.draw.rect(self.window, (0, 0, 0), hud_rect)
-        self.window.blit(hud_surf, (10, 8))
 
-        # draw explosion effects on hit tanks
+        for i, pel in enumerate(self.blue_pelotons):
+            if pel['num_tanks'] <= 0:
+                continue
+            xp = pel['pos'][0] * cell_size
+            yp = pel['pos'][1] * cell_size
+
+            # sprite
+            if self.tiger_img:
+                self.window.blit(self.tiger_img, (xp, yp))
+            else:
+                pygame.draw.rect(self.window, (30, 80, 220), pygame.Rect(xp, yp, cell_size, cell_size))
+
+            # tank count badge
+            txt = font_small.render(str(pel['num_tanks']), True, (255, 255, 255))
+            self.window.blit(txt, (xp + 2, yp + 2))
+
+            # ── HP bar ────────────────────────────────────────────────────────
+            max_hp    = efg.TIGER_PELOTON_HP
+            hp_frac   = max(0.0, pel['hp'] / max_hp)
+            bar_w     = cell_size
+            bar_h     = max(3, cell_size // 6)
+            bar_y     = yp - bar_h - 2
+            pygame.draw.rect(self.window, (60, 0, 0),
+                             pygame.Rect(xp, bar_y, bar_w, bar_h))
+            hp_color  = (0, 220, 60) if hp_frac > 0.5 else (255, 180, 0) if hp_frac > 0.25 else (220, 40, 40)
+            pygame.draw.rect(self.window, hp_color,
+                             pygame.Rect(xp, bar_y, int(bar_w * hp_frac), bar_h))
+
+            # ── ammo bar (blue) ───────────────────────────────────────────────
+            ammo_frac = max(0.0, pel['ammo'] / efg.PELOTON_AMMO)
+            ammo_bar_y = bar_y - bar_h - 1
+            pygame.draw.rect(self.window, (20, 20, 60),
+                             pygame.Rect(xp, ammo_bar_y, bar_w, bar_h))
+            pygame.draw.rect(self.window, (80, 140, 255),
+                             pygame.Rect(xp, ammo_bar_y, int(bar_w * ammo_frac), bar_h))
+
+            # ── meta-action badge ─────────────────────────────────────────────
+            # read last known meta from the env obs (approximate via stored info)
+            # we show the peloton index label with a color hint
+            badge_color = META_COLORS.get(0, (200, 200, 200))  # default capture color
+            badge_surf  = font_tiny.render(f"B{i}", True, badge_color)
+            self.window.blit(badge_surf, (xp, yp + cell_size - 12))
+
+        # ── red pelotons ─────────────────────────────────────────────────────
+        for i, pel in enumerate(self.red_pelotons):
+            if pel['num_tanks'] <= 0:
+                continue
+            xp = pel['pos'][0] * cell_size
+            yp = pel['pos'][1] * cell_size
+
+            if self.sherman_img:
+                self.window.blit(self.sherman_img, (xp, yp))
+            else:
+                pygame.draw.rect(self.window, (200, 30, 30), pygame.Rect(xp, yp, cell_size, cell_size))
+
+            # tank count badge
+            txt = font_small.render(str(pel['num_tanks']), True, (255, 255, 255))
+            self.window.blit(txt, (xp + 2, yp + 2))
+
+            # ── HP bar ────────────────────────────────────────────────────────
+            max_hp   = efg.SHERMAN_PELOTON_HP
+            hp_frac  = max(0.0, pel['hp'] / max_hp)
+            bar_w    = cell_size
+            bar_h    = max(3, cell_size // 6)
+            bar_y    = yp - bar_h - 2
+            pygame.draw.rect(self.window, (60, 0, 0),
+                             pygame.Rect(xp, bar_y, bar_w, bar_h))
+            hp_color = (0, 220, 60) if hp_frac > 0.5 else (255, 180, 0) if hp_frac > 0.25 else (220, 40, 40)
+            pygame.draw.rect(self.window, hp_color,
+                             pygame.Rect(xp, bar_y, int(bar_w * hp_frac), bar_h))
+
+            # ── ammo bar (red) ────────────────────────────────────────────────
+            ammo_frac  = max(0.0, pel['ammo'] / efg.PELOTON_AMMO)
+            ammo_bar_y = bar_y - bar_h - 1
+            pygame.draw.rect(self.window, (60, 10, 10),
+                             pygame.Rect(xp, ammo_bar_y, bar_w, bar_h))
+            pygame.draw.rect(self.window, (255, 100, 60),
+                             pygame.Rect(xp, ammo_bar_y, int(bar_w * ammo_frac), bar_h))
+
+            # peloton index label
+            badge_surf = font_tiny.render(f"R{i}", True, (255, 160, 160))
+            self.window.blit(badge_surf, (xp, yp + cell_size - 12))
+
+        # ── explosions ───────────────────────────────────────────────────────
         still_alive = []
         for exp in self.active_explosions:
-            # Convert grid position to pixel center
             ex = exp['pos'][0] * cell_size + cell_size // 2
             ey = exp['pos'][1] * cell_size + cell_size // 2
-
-            # Fade-out effect based on remaining frames
-            alpha = int(220 * exp['frames_left'] / 4)
+            alpha  = int(220 * exp['frames_left'] / 4)
             radius = cell_size // 2 + 4
             exp_surf = pygame.Surface((cell_size * 3, cell_size * 3), pygame.SRCALPHA)
-            center = (cell_size + cell_size // 2, cell_size + cell_size // 2)
-
-            # Draw explosion layers (outer → inner)
-            pygame.draw.circle(exp_surf, (255, 200, 0, alpha),            center, radius)
-            pygame.draw.circle(exp_surf, (255, 80,  0, min(255, alpha + 40)), center, radius // 2)
-            pygame.draw.circle(exp_surf, (255, 255, 200, min(255, alpha + 80)), center, radius // 4)
-            self.window.blit(exp_surf, (ex - cell_size - cell_size // 2, ey - cell_size - cell_size // 2))
-            
-            exp['frames_left'] -= 1 # decrease lifetime
-
-            # keep explosion if still active
+            center   = (cell_size + cell_size // 2, cell_size + cell_size // 2)
+            pygame.draw.circle(exp_surf, (255, 200,   0, alpha),             center, radius)
+            pygame.draw.circle(exp_surf, (255,  80,   0, min(255, alpha+40)), center, radius // 2)
+            pygame.draw.circle(exp_surf, (255, 255, 200, min(255, alpha+80)), center, radius // 4)
+            self.window.blit(exp_surf, (ex - cell_size - cell_size // 2,
+                                        ey - cell_size - cell_size // 2))
+            exp['frames_left'] -= 1
             if exp['frames_left'] > 0:
                 still_alive.append(exp)
         self.active_explosions = still_alive
 
-        # final render
+        # ── HUD (top-left, episode/step) ──────────────────────────────────────
+        hud_text = f"ep {self.episode}   step {self.step_count}"
+        hud_surf = font_hud.render(hud_text, True, (255, 255, 255))
+        hud_rect = pygame.Rect(4, 4, hud_surf.get_width() + 12, 28)
+        pygame.draw.rect(self.window, (0, 0, 0), hud_rect)
+        self.window.blit(hud_surf, (10, 8))
+
+        # ── STATS PANEL (right side) ─────────────────────────────────────────
+        px = 908   # left edge of panel
+        py = 10
+        font_panel  = pygame.font.Font(None, 20)
+        font_header = pygame.font.Font(None, 22)
+
+        def panel_text(text, color=(220, 220, 220), bold=False):
+            nonlocal py
+            f = font_header if bold else font_panel
+            surf = f.render(text, True, color)
+            self.window.blit(surf, (px, py))
+            py += surf.get_height() + 3
+
+        def panel_separator(color=(50, 60, 75)):
+            nonlocal py
+            pygame.draw.line(self.window, color, (px, py), (px + PANEL_WIDTH - 16, py), 1)
+            py += 6
+
+        # ── Episode / Step ────────────────────────────────────────────────────
+        panel_text("-- BATTLE STATUS --", (180, 200, 255), bold=True)
+        panel_text(f"Episode : {self.episode}", (200, 200, 255))
+        panel_text(f"Step    : {self.step_count}", (200, 200, 255))
+        if self.capture_countdown is not None:
+            panel_text(f"Overtime: {self.capture_countdown}", (255, 80, 80))
+        panel_separator()
+
+        # ── Capture points ────────────────────────────────────────────────────
+        panel_text("━━ OBJECTIVES ━━", (255, 215, 0), bold=True)
+        for name in ['A', 'B', 'C']:
+            blue_holds = self.captured[name]
+            red_holds  = self.red_captured[name]
+            if blue_holds:
+                status, col = "BLUE ", (80, 140, 255)
+            elif red_holds:
+                status, col = "RED  ", (255, 80, 80)
+            else:
+                status, col = "FREE   ", (180, 180, 180)
+            panel_text(f"  {name} : {status}", col)
+        panel_separator()
+
+        # ── Team overview ─────────────────────────────────────────────────────
+        blue_alive  = sum(1 for p in self.blue_pelotons if p['num_tanks'] > 0)
+        red_alive   = sum(1 for p in self.red_pelotons  if p['num_tanks'] > 0)
+        blue_tanks  = sum(p['num_tanks'] for p in self.blue_pelotons)
+        red_tanks   = sum(p['num_tanks'] for p in self.red_pelotons)
+
+        panel_text("━━ FORCES ━━", (200, 255, 200), bold=True)
+        panel_text(f"BLUE  pel:{blue_alive}/{len(self.blue_pelotons)}  tnk:{blue_tanks}", (80, 160, 255))
+        panel_text(f"RED   pel:{red_alive}/{len(self.red_pelotons)}  tnk:{red_tanks}", (255, 100, 100))
+        panel_separator()
+
+        # ── Blue peloton detail ───────────────────────────────────────────────
+        panel_text("━━ BLUE PELOTONS ━━", (80, 160, 255), bold=True)
+        for i, pel in enumerate(self.blue_pelotons):
+            if pel['num_tanks'] <= 0:
+                panel_text(f"  B{i}  DESTROYED", (100, 100, 120))
+                continue
+            max_hp  = efg.TIGER_PELOTON_HP
+            hp_pct  = int(pel['hp'] / max_hp * 100)
+            hp_col  = (0, 210, 60) if hp_pct > 50 else (255, 180, 0) if hp_pct > 25 else (220, 60, 60)
+            panel_text(f"  B{i} HP:{hp_pct:3d}%  TNK:{pel['num_tanks']}", hp_col)
+            panel_text(f"     AMM:{pel['ammo']:3d}  FUEL:{pel['fuel']:4d}", (160, 160, 200))
+        panel_separator()
+
+        # ── Red peloton detail ────────────────────────────────────────────────
+        panel_text("━━ RED PELOTONS ━━", (255, 100, 100), bold=True)
+        for i, pel in enumerate(self.red_pelotons):
+            if pel['num_tanks'] <= 0:
+                panel_text(f"  R{i} ✖ DESTROYED", (100, 100, 120))
+                continue
+            max_hp  = efg.SHERMAN_PELOTON_HP
+            hp_pct  = int(pel['hp'] / max_hp * 100)
+            hp_col  = (0, 210, 60) if hp_pct > 50 else (255, 180, 0) if hp_pct > 25 else (220, 60, 60)
+            panel_text(f"  R{i} HP:{hp_pct:3d}%  TNK:{pel['num_tanks']}", hp_col)
+            panel_text(f"     AMM:{pel['ammo']:3d}  FUEL:{pel['fuel']:4d}", (200, 160, 160))
+
+        # ── final render ──────────────────────────────────────────────────────
         pygame.display.flip()
         self.clock.tick(self.metadata["render_fps"])
     
