@@ -7,7 +7,7 @@ DAMAGE_PER_ATTACK = SHERMAN_DAMAGE  # default kept for red team
 # -------- normandy_env -----------
 NUM_BLUE = 4
 NUM_RED  = 12
-MAP_SIZE = 40 # 25
+MAP_SIZE = 100 # 25
 MAX_STEPS = 500 # X LO eliminamos porque lo gestiona TimeLimit
 
 # commander meta-actions: the commander decides WHICH sub-agent takes action on the peloton this step
@@ -30,7 +30,7 @@ P_STEP          = -1.0  # small relative to capture/win rewards so shaping signa
 OBS_SIZE = 16
 
 # seed for the map
-SEED = 1 # 42
+SEED = 482 # 42
 
 # render every N episodes default
 RENDER_EVERY = 1000
@@ -46,3 +46,15 @@ PELOTON_FUEL = 500
 
 TIGER_PELOTON_HP = 600
 SHERMAN_PELOTON_HP = 300
+
+# -------- Luftwaffe (German air support) ----------
+LUFTWAFFE_ENABLED      = True   # toggle to disable the Luftwaffe entirely
+LUFTWAFFE_BLAST_RADIUS = 4      # Manhattan-distance radius of the bomb
+LUFTWAFFE_BASE_DAMAGE  = 120    # maximum damage at ground zero (before cover/falloff)
+R_LUFTWAFFE_HIT        = 40     # reward per blue commander for each Luftwaffe hit
+R_LUFTWAFFE_KILL       = 100    # extra reward when a red platoon is destroyed by air
+
+# -------- SmolAgents Field Marshal ----------
+FM_STRATEGY_INTERVAL   = 500    # episodes between LLM strategy calls
+FM_STRATEGY_BONUS      = 0.8    # reward bonus when a commander follows FM priority action
+FM_MODEL_ID            = "Qwen/Qwen2.5-72B-Instruct"   # HuggingFace model for the FM

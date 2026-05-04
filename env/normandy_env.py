@@ -19,6 +19,7 @@ from agents.attack_agent   import attack_agent,  SHOOT
 from agents.defense_agent  import defense_agent, TAKE_COVER
 from agents.capture_agent  import capture_agent, MOVE_UP, MOVE_DOWN, MOVE_LEFT, MOVE_RIGHT, STAY
 from agents.command_agent  import command_agent
+from agents.luftwaffe_agent import LuftwaffeAgent, IB, ST, RT
 
 NUM_BLUE = efg.NUM_BLUE
 NUM_RED  = efg.NUM_RED
@@ -105,8 +106,12 @@ class NormandyEnv(gym.Env):
         self.clock           = None
         self.tiger_img       = None   # cached so we don't reload every step
         self.sherman_img     = None
+        self.ju87_img        = None   # Luftwaffe Stuka sprite
         self.map_bg_surface  = None   # optional background image (mapaNormandia.png)
         self.active_explosions = []   # list of {pos, frames_left} for hit effects
+
+        # Luftwaffe — German air support (Markov Chain + PSO targeting)
+        self.luftwaffe_agent = LuftwaffeAgent(map_size=MAP_SIZE) if efg.LUFTWAFFE_ENABLED else None
 
         self.reset()
 
@@ -183,6 +188,10 @@ class NormandyEnv(gym.Env):
         self.red_captured = {'A': False, 'B': False, 'C': False}
         for ca in self.red_capture_agents:
             ca.reset_position_history()
+
+        # Reset Luftwaffe for a fresh episode
+        if self.luftwaffe_agent is not None:
+            self.luftwaffe_agent.reset()
 
         # returns
         self.obs = self._get_obs()
@@ -293,6 +302,25 @@ class NormandyEnv(gym.Env):
                     if self.red_captured[point_name]:
                         self.red_captured[point_name] = False  # blue reconquers it from red
                     rewards[i] += R_CAPTURE_B if point_name == 'B' else R_CAPTURE_A_C
+
+        # ── Luftwaffe phase (German air support) ─────────────────────────────
+        # Order a new strike via PSO if the aircraft is available, then advance
+        # the Markov Chain state machine one step.
+        if self.luftwaffe_agent is not None and self.luftwaffe_agent.is_active:
+            self.luftwaffe_agent.try_order_strike(
+                self.red_pelotons, self.map, current_step=self.step_count
+            )
+            lw_hits = self.luftwaffe_agent.step(self.red_pelotons, self.map)
+            for hit in lw_hits:
+                # Distribute the air-strike reward equally among alive blue commanders
+                for i in range(NUM_BLUE):
+                    rewards[i] += efg.R_LUFTWAFFE_HIT
+                    if hit['old_tanks'] > 0 and hit['platoon']['num_tanks'] <= 0:
+                        rewards[i] += efg.R_LUFTWAFFE_KILL
+                # Explosion visual at bombed position
+                self.active_explosions.append({
+                    'pos': list(hit['platoon']['pos']), 'frames_left': 4
+                })
 
         # snapshot hp before red attacks (to detect got_hit for blue later)
         blue_hp_before_red = [p['hp'] for p in self.blue_pelotons]
@@ -753,6 +781,14 @@ class NormandyEnv(gym.Env):
 
     # get's general info in any moment of the battle
     def _get_info(self):
+        lw_info = {}
+        if self.luftwaffe_agent is not None:
+            lw_info = {
+                'lw_state':    self.luftwaffe_agent.state_name,
+                'lw_missions': self.luftwaffe_agent.missions_done,
+                'lw_active':   self.luftwaffe_agent.is_active,
+                'lw_target':   self.luftwaffe_agent.current_target,
+            }
         return {
             'step':              self.step_count,
             'blue_alive':        sum(1 for p in self.blue_pelotons if p['num_tanks'] > 0),
@@ -761,6 +797,7 @@ class NormandyEnv(gym.Env):
             'red_captured':      self.red_captured.copy(),
             'red_eps':           self.red_command_agents[0].epsilon,
             'capture_countdown': self.capture_countdown,
+            **lw_info,
         }
 
     # goes to next episode
@@ -806,6 +843,15 @@ class NormandyEnv(gym.Env):
             except Exception:
                 self.tiger_img   = None
                 self.sherman_img = None
+            # Luftwaffe Stuka — loaded at slightly larger size so it is visible while flying
+            try:
+                ju87_size = max(cell_size * 6, 24)
+                self.ju87_img = pygame.transform.scale(
+                    pygame.image.load("resources/ju87.png").convert_alpha(),
+                    (ju87_size, ju87_size),
+                )
+            except Exception:
+                self.ju87_img = None
             # initialize smoke particle list
             self.smoke_particles = []
 
@@ -996,7 +1042,7 @@ class NormandyEnv(gym.Env):
             radius = cell_size // 2 + 4
             exp_surf = pygame.Surface((cell_size * 3, cell_size * 3), pygame.SRCALPHA)
             center   = (cell_size + cell_size // 2, cell_size + cell_size // 2)
-            pygame.draw.circle(exp_surf, (255, 200,   0, alpha),             center, radius)
+            pygame.draw.circle(exp_surf, (255, 200,   0, min(255, alpha)),    center, radius)
             pygame.draw.circle(exp_surf, (255,  80,   0, min(255, alpha+40)), center, radius // 2)
             pygame.draw.circle(exp_surf, (255, 255, 200, min(255, alpha+80)), center, radius // 4)
             self.window.blit(exp_surf, (ex - cell_size - cell_size // 2,
@@ -1088,6 +1134,103 @@ class NormandyEnv(gym.Env):
             hp_col  = (0, 210, 60) if hp_pct > 50 else (255, 180, 0) if hp_pct > 25 else (220, 60, 60)
             panel_text(f"  R{i} HP:{hp_pct:3d}%  TNK:{pel['num_tanks']}", hp_col)
             panel_text(f"     AMM:{pel['ammo']:3d}  FUEL:{pel['fuel']:4d}", (200, 160, 160))
+
+        # ── Luftwaffe status panel ─────────────────────────────────────────────
+        if self.luftwaffe_agent is not None:
+            panel_separator()
+            panel_text("-- LUFTWAFFE --", (255, 240, 120), bold=True)
+            lw = self.luftwaffe_agent
+            if not lw.is_active:
+                panel_text("  X SHOT DOWN", (120, 120, 120))
+            else:
+                state_colors = {
+                    "AVAILABLE": (100, 255, 100),
+                    "INBOUND":   (255, 220,  50),
+                    "STRIKING":  (255,  80,  80),
+                    "RETURNING": (150, 200, 255),
+                    "REARMING":  (180, 180, 180),
+                }
+                sc = state_colors.get(lw.state_name, (220, 220, 220))
+                panel_text(f"  State  : {lw.state_name}", sc)
+                panel_text(f"  Missions: {lw.missions_done}", (220, 220, 180))
+                if lw.current_target:
+                    tx_p, ty_p = lw.current_target
+                    panel_text(f"  Target : ({tx_p},{ty_p})", (255, 200, 80))
+                # Show remaining delay before first sortie
+                steps_until = lw.START_DELAY - self.step_count
+                if steps_until > 0:
+                    panel_text(f"  Sortie in: {steps_until} steps", (160, 160, 160))
+
+        # ── Luftwaffe on-map visualisation ────────────────────────────────────
+        if self.luftwaffe_agent is not None and self.luftwaffe_agent.is_active:
+            import math as _math
+            lw       = self.luftwaffe_agent
+            lw_vpos  = lw.get_visual_pos()
+
+            # ── Target crosshair (visible while a mission is active) ──────────
+            if lw.last_target is not None and lw.mc.state in (IB, ST, RT):
+                tx, ty    = lw.last_target
+                cx_px     = tx * cell_size + cell_size // 2
+                cy_px     = ty * cell_size + cell_size // 2
+                r_px      = lw.BLAST_RADIUS * cell_size
+                tgt_surf  = pygame.Surface((r_px * 2 + 4, r_px * 2 + 4), pygame.SRCALPHA)
+                pygame.draw.circle(tgt_surf, (255, 80, 50, 45),
+                                   (r_px + 2, r_px + 2), r_px)
+                pygame.draw.circle(tgt_surf, (255, 80, 50, 180),
+                                   (r_px + 2, r_px + 2), r_px, 2)
+                self.window.blit(tgt_surf, (cx_px - r_px - 2, cy_px - r_px - 2))
+                pygame.draw.circle(self.window, (255, 60, 60), (cx_px, cy_px), 3)
+
+            # ── Aircraft sprite ───────────────────────────────────────────────
+            if lw_vpos is not None:
+                ax_px = int(lw_vpos[0] * cell_size + cell_size // 2)
+                ay_px = int(lw_vpos[1] * cell_size + cell_size // 2)
+
+                # Flight path line: current pos → target
+                if (lw.last_target is not None
+                        and lw.mc.state in (IB, RT)):
+                    if lw.mc.state == IB:
+                        ex_px = lw.last_target[0] * cell_size + cell_size // 2
+                        ey_px = lw.last_target[1] * cell_size + cell_size // 2
+                    else:
+                        ex_px = lw.base_pos[0] * cell_size + cell_size // 2
+                        ey_px = lw.base_pos[1] * cell_size + cell_size // 2
+                    path_surf = pygame.Surface((900, 900), pygame.SRCALPHA)
+                    pygame.draw.line(path_surf, (255, 240, 80, 90),
+                                     (ax_px, ay_px), (ex_px, ey_px), 1)
+                    self.window.blit(path_surf, (0, 0))
+
+                # Airplane sprite — rotate ju87.png to match flight direction.
+                # pygame.transform.rotate() is counter-clockwise in degrees.
+                # get_flight_direction() returns (dx, dy) in screen coords (y down).
+                # atan2(-dy, dx) converts to standard math angle; -90 corrects for
+                # the sprite's default orientation (nose pointing up = 0 deg offset).
+                dx, dy    = lw.get_flight_direction()
+                angle_deg = _math.degrees(_math.atan2(-dy, dx)) - 90
+
+                if self.ju87_img is not None:
+                    rotated = pygame.transform.rotate(self.ju87_img, angle_deg)
+                    rect    = rotated.get_rect(center=(ax_px, ay_px))
+                    self.window.blit(rotated, rect)
+                else:
+                    # Fallback polygon arrow when sprite is missing
+                    s     = max(5, cell_size)
+                    cos_a = _math.cos(_math.atan2(dy, dx))
+                    sin_a = _math.sin(_math.atan2(dy, dx))
+
+                    def _rot(px, py):
+                        return (ax_px + int(cos_a * px - sin_a * py),
+                                ay_px + int(sin_a * px + cos_a * py))
+
+                    pts = [_rot(s * 2, 0), _rot(-s, -int(s * 1.2)),
+                           _rot(-int(s * 1.6), 0), _rot(-s, int(s * 1.2))]
+                    fb_surf = pygame.Surface((900, 900), pygame.SRCALPHA)
+                    pygame.draw.polygon(fb_surf, (240, 240, 90, 230), pts)
+                    self.window.blit(fb_surf, (0, 0))
+
+                # "LW" label next to the sprite
+                lw_lbl = font_small.render("LW", True, (255, 240, 80))
+                self.window.blit(lw_lbl, (ax_px + max(5, cell_size) + 2, ay_px - 8))
 
         # ── final render ──────────────────────────────────────────────────────
         pygame.display.flip()
