@@ -1,4 +1,3 @@
-# Luftwaffe - German air support for the Normandy simulation
 #
 # Two AI techniques from the course are used here:
 #
@@ -21,6 +20,7 @@ import sys
 import numpy as np
 import random
 from pyswarm import pso
+import env.env_config as cfg
 
 
 # Markov Chain state constants
@@ -55,7 +55,7 @@ class LuftwaffeMarkovChain:
 
     P_FLAK       = 0.04  # prob of being shot down per step while INBOUND
     FLIGHT_STEPS = 5     # steps to reach / return from target
-    REARM_STEPS  = 8     # steps to reload at base
+    REARM_STEPS  = 15    # fallback value, real value is sampled in [min,max]
 
     # Transition matrix 6x6
     # Rows / cols: AV, IB, ST, RT, RA, SD
@@ -69,7 +69,10 @@ class LuftwaffeMarkovChain:
         [0.00,  0.00,        0.00,       0.00, 0.00, 1.00],   # SD absorbing
     ], dtype=np.float64)
 
-    def __init__(self):
+    def __init__(self, rearm_min_steps=10, rearm_max_steps=20):
+        self.rearm_min_steps = int(max(1, rearm_min_steps))
+        self.rearm_max_steps = int(max(self.rearm_min_steps, rearm_max_steps))
+        self.current_rearm_steps = random.randint(self.rearm_min_steps, self.rearm_max_steps)
         self.state          = AV
         self.steps_in_state = 0
         self.target_pos     = None
@@ -121,9 +124,11 @@ class LuftwaffeMarkovChain:
             if self.steps_in_state >= self.FLIGHT_STEPS:
                 self.state          = RA
                 self.steps_in_state = 0
+                # sample a fresh ground cooldown each mission (more realistic cadence)
+                self.current_rearm_steps = random.randint(self.rearm_min_steps, self.rearm_max_steps)
 
         elif self.state == RA:
-            if self.steps_in_state >= self.REARM_STEPS:
+            if self.steps_in_state >= self.current_rearm_steps:
                 self.state          = AV
                 self.steps_in_state = 0
                 event               = "AVAILABLE"
@@ -131,6 +136,7 @@ class LuftwaffeMarkovChain:
         return self.state, event
 
     def reset(self):
+        self.current_rearm_steps = random.randint(self.rearm_min_steps, self.rearm_max_steps)
         self.state          = AV
         self.steps_in_state = 0
         self.target_pos     = None
@@ -161,19 +167,29 @@ class LuftwaffeAgent:
     #   f(x, y) = sum of HP_enemy * (1 - cover*0.5) * distance_factor
     # Since pso() minimises, we return -f to find the maximum damage position.
 
-    BLAST_RADIUS  = 4    # Manhattan radius of the bomb blast
-    BASE_DAMAGE   = 120  # max damage at ground zero with no cover
-    NUM_PARTICLES = 15   # number of PSO particles
-    MAX_ITERS     = 20   # max PSO iterations
+    BLAST_RADIUS  = cfg.LUFTWAFFE_BLAST_RADIUS  # Manhattan radius of the bomb blast
+    BASE_DAMAGE   = cfg.LUFTWAFFE_BASE_DAMAGE   # max damage at ground zero with no cover
+    NUM_PARTICLES = 50   # number of PSO particles
+    MAX_ITERS     = 40   # max PSO iterations
     INERTIA       = 0.5  # omega - weight of previous velocity
     C_PERSONAL    = 1.5  # phip  - pull toward personal best
     C_GLOBAL      = 1.5  # phig  - pull toward global best
-    START_DELAY   = 40   # steps to wait before first strike (let spawns spread out)
+    START_DELAY   = getattr(cfg, "LUFTWAFFE_START_DELAY", 40)  # steps to wait before first strike
 
     def __init__(self, map_size):
         self.map_size     = map_size
-        self.mc           = LuftwaffeMarkovChain()
+        rearm_min         = int(getattr(cfg, "LUFTWAFFE_REARM_MIN_STEPS", 10))
+        rearm_max         = int(getattr(cfg, "LUFTWAFFE_REARM_MAX_STEPS", 20))
+        self.mc           = LuftwaffeMarkovChain(rearm_min_steps=rearm_min, rearm_max_steps=rearm_max)
         self.last_target  = None
+        # read runtime config values explicitly (makes config edits apply predictably)
+        self.BLAST_RADIUS = int(cfg.LUFTWAFFE_BLAST_RADIUS)
+        self.BASE_DAMAGE  = float(cfg.LUFTWAFFE_BASE_DAMAGE)
+        self.START_DELAY  = int(getattr(cfg, "LUFTWAFFE_START_DELAY", self.START_DELAY))
+        self.RESPAWN_STEPS = int(getattr(cfg, "LUFTWAFFE_RESPAWN_STEPS", 200))
+        self.MAX_RESPAWNS_PER_EPISODE = int(getattr(cfg, "LUFTWAFFE_MAX_RESPAWNS_PER_EPISODE", 1))
+        self.respawn_count = 0
+        self.respawn_due_step = None
         # base is at the top-right corner (aircraft comes from Germany)
         self.base_pos     = (map_size - 1, 0)
 
@@ -183,8 +199,34 @@ class LuftwaffeAgent:
             f"cycle={stats['cycle_len']} steps | "
             f"P(survive mission)={stats['p_survive']:.1%} | "
             f"availability~{stats['availability']:.1%} | "
-            f"expected missions~{stats['expected_missions']}"
+            f"expected missions~{stats['expected_missions']} | "
+            f"blast_radius={self.BLAST_RADIUS} | "
+            f"base_damage={self.BASE_DAMAGE:.0f} | "
+            f"start_delay={self.START_DELAY} | "
+            f"rearm={self.mc.rearm_min_steps}-{self.mc.rearm_max_steps} | "
+            f"respawn={self.RESPAWN_STEPS} (max {self.MAX_RESPAWNS_PER_EPISODE})"
         )
+
+    def tick(self, current_step):
+        # keep Luftwaffe lifecycle in sync with global env step
+        # this also handles delayed respawn after shot down
+        if not self.mc.shot_down:
+            return None
+
+        if self.respawn_count >= self.MAX_RESPAWNS_PER_EPISODE:
+            return None
+
+        if self.respawn_due_step is None:
+            self.respawn_due_step = current_step + self.RESPAWN_STEPS
+            return None
+
+        if current_step >= self.respawn_due_step:
+            self.mc.reset()
+            self.last_target = None
+            self.respawn_count += 1
+            self.respawn_due_step = None
+            return "RESPAWNED"
+        return None
 
     def _objective(self, x, y, red_platoons, map_grid):
         # computes expected blast damage at (x, y), negated for PSO minimisation
@@ -275,6 +317,8 @@ class LuftwaffeAgent:
     def reset(self):
         self.mc.reset()
         self.last_target = None
+        self.respawn_count = 0
+        self.respawn_due_step = None
 
     def get_visual_pos(self):
         # returns the float (x, y) grid position of the plane for rendering
@@ -332,3 +376,7 @@ class LuftwaffeAgent:
     @property
     def missions_done(self):
         return self.mc.missions_done
+
+    @property
+    def respawn_eta(self):
+        return self.respawn_due_step

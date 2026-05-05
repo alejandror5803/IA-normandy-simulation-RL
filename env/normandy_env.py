@@ -44,6 +44,7 @@ P_STEP          = efg.P_STEP
 
 # observation vector size (one per blue peloton)
 OBS_SIZE = efg.OBS_SIZE
+ENEMY_NEARBY_RANGE = efg.ENEMY_NEARBY_RANGE
 
 # Creates a class which as implmented t
 class NormandyEnv(gym.Env):
@@ -113,6 +114,12 @@ class NormandyEnv(gym.Env):
         # Luftwaffe — German air support (Markov Chain + PSO targeting)
         self.luftwaffe_agent = LuftwaffeAgent(map_size=MAP_SIZE) if efg.LUFTWAFFE_ENABLED else None
 
+        # Field Marshal reward multipliers (Option A) - set externally every N episodes
+        # applied to BOTH blue (in training_and_eval.py) and red (here in step())
+        self.fm_capture_mult = 1.0
+        self.fm_kill_mult    = 1.0
+        self.fm_defend_mult  = 1.0
+
         self.reset()
 
     # Each peloton consists of this caracteristics when it is created
@@ -170,6 +177,7 @@ class NormandyEnv(gym.Env):
         self.active_explosions = []
         self.capture_countdown      = None  # steps remaining in overtime (None = not active)
         self.capture_countdown_team = None  # 'blue' or 'red' — who triggered it
+        self._last_winner           = None  # 'blue', 'red', 'draw' or None (ongoing)
 
         # same starting positions every episode (set once in __init__)
         self.blue_pelotons = []
@@ -303,24 +311,29 @@ class NormandyEnv(gym.Env):
                         self.red_captured[point_name] = False  # blue reconquers it from red
                     rewards[i] += R_CAPTURE_B if point_name == 'B' else R_CAPTURE_A_C
 
-        # ── Luftwaffe phase (German air support) ─────────────────────────────
+        # --- Luftwaffe phase (German air support) ------------------------------
         # Order a new strike via PSO if the aircraft is available, then advance
         # the Markov Chain state machine one step.
-        if self.luftwaffe_agent is not None and self.luftwaffe_agent.is_active:
-            self.luftwaffe_agent.try_order_strike(
-                self.red_pelotons, self.map, current_step=self.step_count
-            )
-            lw_hits = self.luftwaffe_agent.step(self.red_pelotons, self.map)
-            for hit in lw_hits:
-                # Distribute the air-strike reward equally among alive blue commanders
-                for i in range(NUM_BLUE):
-                    rewards[i] += efg.R_LUFTWAFFE_HIT
-                    if hit['old_tanks'] > 0 and hit['platoon']['num_tanks'] <= 0:
-                        rewards[i] += efg.R_LUFTWAFFE_KILL
-                # Explosion visual at bombed position
-                self.active_explosions.append({
-                    'pos': list(hit['platoon']['pos']), 'frames_left': 4
-                })
+        if self.luftwaffe_agent is not None:
+            lw_event = self.luftwaffe_agent.tick(self.step_count)
+            #if lw_event == "RESPAWNED":
+            #    print(f"[Luftwaffe] aircraft restored at step {self.step_count} (respawn {self.luftwaffe_agent.respawn_count})")
+
+            if self.luftwaffe_agent.is_active:
+                self.luftwaffe_agent.try_order_strike(
+                    self.red_pelotons, self.map, current_step=self.step_count
+                )
+                lw_hits = self.luftwaffe_agent.step(self.red_pelotons, self.map)
+                for hit in lw_hits:
+                    # Distribute the air-strike reward equally among alive blue commanders
+                    for i in range(NUM_BLUE):
+                        rewards[i] += efg.R_LUFTWAFFE_HIT
+                        if hit['old_tanks'] > 0 and hit['platoon']['num_tanks'] <= 0:
+                            rewards[i] += efg.R_LUFTWAFFE_KILL
+                    # Explosion visual at bombed position
+                    self.active_explosions.append({
+                        'pos': list(hit['platoon']['pos']), 'frames_left': 4
+                    })
 
         # snapshot hp before red attacks (to detect got_hit for blue later)
         blue_hp_before_red = [p['hp'] for p in self.blue_pelotons]
@@ -432,7 +445,7 @@ class NormandyEnv(gym.Env):
 
             # Compute next enemy proximity
             nearest_now, dist_now = get_nearest_enemy(pel, self.red_pelotons)
-            next_enemy_nearby = 1 if (nearest_now is not None and dist_now <= 4) else 0
+            next_enemy_nearby = 1 if (nearest_now is not None and dist_now <= ENEMY_NEARBY_RANGE) else 0
             next_cover_val    = self.map[pel['pos'][1]][pel['pos'][0]]['cover']
             next_cover_type   = get_cover_type_int(next_cover_val)
             def_reward = self.defense_agents[i].compute_reward(
@@ -476,7 +489,7 @@ class NormandyEnv(gym.Env):
 
             #  Defense agent (red) 
             nearest_blue_now, dist_blue_now = get_nearest_enemy(red_pel, self.blue_pelotons)
-            next_enemy_nearby_r = 1 if (nearest_blue_now is not None and dist_blue_now <= 4) else 0
+            next_enemy_nearby_r = 1 if (nearest_blue_now is not None and dist_blue_now <= ENEMY_NEARBY_RANGE) else 0
             next_cover_val_r    = self.map[red_pel['pos'][1]][red_pel['pos'][0]]['cover']
             next_cover_type_r   = get_cover_type_int(next_cover_val_r)
             def_reward_r = self.red_defense_agents[i].compute_reward(
@@ -500,9 +513,17 @@ class NormandyEnv(gym.Env):
                 self.red_capture_agents[i].update_position_history(new_pos_r)
 
             # command agent update for red
+            # apply FM reward multipliers (Option A) to red agents the same way as blue
             new_obs_r  = red_obs_after[i]
+            _red_mults = {
+                META_CAPTURE: self.fm_capture_mult,
+                META_ATTACK:  self.fm_kill_mult,
+                META_DEFENSE: self.fm_defend_mult,
+            }
+            red_mult = _red_mults.get(red_meta_taken[i], 1.0)
             cmd_r      = self.red_command_agents[i].compute_reward(
-                psr['obs_vec'], new_obs_r, red_meta_taken[i], red_rewards[i]
+                psr['obs_vec'], new_obs_r, red_meta_taken[i], red_rewards[i],
+                reward_mult=red_mult,
             )
             self.red_command_agents[i].update(psr['obs_vec'], red_meta_taken[i], cmd_r, new_obs_r)
 
@@ -514,9 +535,10 @@ class NormandyEnv(gym.Env):
 
         terminated = False
 
-        # instant win — one side wiped out completely
+        # win condition 1: one side wiped out completely
         if all_dead(self.blue_pelotons):
             terminated = True
+            self._last_winner = 'red'
             for i in range(NUM_BLUE):
                 rewards[i] += P_LOSE
             for i in range(NUM_RED):
@@ -524,13 +546,14 @@ class NormandyEnv(gym.Env):
 
         if all_dead(self.red_pelotons):
             terminated = True
+            self._last_winner = 'blue'
             for i in range(NUM_BLUE):
                 rewards[i] += R_WIN
             for i in range(NUM_RED):
                 red_rewards[i] += P_LOSE
 
         if not terminated:
-            # start overtime the first time a team holds all 3 points
+            # win condition 2: hold all 3 objectives for CAPTURE_OVERTIME steps
             if all(self.captured.values()) and self.capture_countdown is None:
                 self.capture_countdown      = efg.CAPTURE_OVERTIME
                 self.capture_countdown_team = 'blue'
@@ -553,29 +576,54 @@ class NormandyEnv(gym.Env):
                     if self.capture_countdown <= 0:
                         terminated = True
                         if self.capture_countdown_team == 'blue':
+                            self._last_winner = 'blue'
                             for i in range(NUM_BLUE):
                                 rewards[i] += R_WIN
                             for i in range(NUM_RED):
                                 red_rewards[i] += P_LOSE
                         else:
+                            self._last_winner = 'red'
                             for i in range(NUM_RED):
                                 red_rewards[i] += R_WIN
                             for i in range(NUM_BLUE):
                                 rewards[i] += P_LOSE
+
+            # win condition 3: time limit reached — most captures wins; alive tanks as tiebreaker
+            if not terminated and self.step_count >= efg.MAX_STEPS:
+                blue_caps  = sum(1 for v in self.captured.values()     if v)
+                red_caps   = sum(1 for v in self.red_captured.values() if v)
+                if blue_caps != red_caps:
+                    winner = 'blue' if blue_caps > red_caps else 'red'
+                else:
+                    blue_tanks = sum(p['num_tanks'] for p in self.blue_pelotons)
+                    red_tanks  = sum(p['num_tanks'] for p in self.red_pelotons)
+                    if blue_tanks != red_tanks:
+                        winner = 'blue' if blue_tanks > red_tanks else 'red'
+                    else:
+                        winner = 'draw'
+
+                self._last_winner = winner
+                if winner == 'blue':
+                    for i in range(NUM_BLUE): rewards[i]     += R_WIN
+                    for i in range(NUM_RED):  red_rewards[i] += P_LOSE
+                elif winner == 'red':
+                    for i in range(NUM_RED):  red_rewards[i] += R_WIN
+                    for i in range(NUM_BLUE): rewards[i]     += P_LOSE
+                # draw: no extra reward
 
         truncated = False
 
         # Decay exploration (epsilon) after each episode
         if terminated or truncated:
             for i in range(NUM_BLUE):
-                self.attack_agents[i].decay_epsilon(decay_rate=0.999,  min_epsilon=0.05)
-                self.defense_agents[i].decay_epsilon(decay_rate=0.999,  min_epsilon=0.05)
-                self.capture_agents[i].decay_epsilon(decay_rate=0.9995, min_epsilon=0.05)
+                self.attack_agents[i].decay_epsilon(decay_rate=efg.EPS_DECAY_BLUE_ATTACK,  min_epsilon=0.05)
+                self.defense_agents[i].decay_epsilon(decay_rate=efg.EPS_DECAY_BLUE_DEFENSE, min_epsilon=0.05)
+                self.capture_agents[i].decay_epsilon(decay_rate=efg.EPS_DECAY_BLUE_CAPTURE, min_epsilon=0.05)
             for i in range(NUM_RED):
-                self.red_command_agents[i].decay_epsilon(decay_rate=0.999,  min_epsilon=0.05)
-                self.red_attack_agents[i].decay_epsilon(decay_rate=0.999,  min_epsilon=0.05)
-                self.red_defense_agents[i].decay_epsilon(decay_rate=0.999,  min_epsilon=0.05)
-                self.red_capture_agents[i].decay_epsilon(decay_rate=0.9995, min_epsilon=0.05)
+                self.red_command_agents[i].decay_epsilon(decay_rate=efg.EPS_DECAY_RED_COMMAND, min_epsilon=0.05)
+                self.red_attack_agents[i].decay_epsilon(decay_rate=efg.EPS_DECAY_RED_ATTACK,   min_epsilon=0.05)
+                self.red_defense_agents[i].decay_epsilon(decay_rate=efg.EPS_DECAY_RED_DEFENSE, min_epsilon=0.05)
+                self.red_capture_agents[i].decay_epsilon(decay_rate=efg.EPS_DECAY_RED_CAPTURE, min_epsilon=0.05)
 
         if self.render_mode == "human":
             self._render()
@@ -597,7 +645,7 @@ class NormandyEnv(gym.Env):
             atk_state = self.attack_agents[i].get_state(enemies_in_range)
 
             nearest_enemy, nearest_dist = get_nearest_enemy(pel, self.red_pelotons)
-            enemy_nearby = 1 if (nearest_enemy is not None and nearest_dist <= 4) else 0
+            enemy_nearby = 1 if (nearest_enemy is not None and nearest_dist <= ENEMY_NEARBY_RANGE) else 0
             cover_val    = self.map[pel['pos'][1]][pel['pos'][0]]['cover']
             cover_type   = get_cover_type_int(cover_val)
 
@@ -650,7 +698,7 @@ class NormandyEnv(gym.Env):
 
             # Compute proximity to nearest blue
             nearest_blue, nearest_dist = get_nearest_enemy(red_pel, self.blue_pelotons)
-            enemy_nearby = 1 if (nearest_blue is not None and nearest_dist <= 4) else 0
+            enemy_nearby = 1 if (nearest_blue is not None and nearest_dist <= ENEMY_NEARBY_RANGE) else 0
             cover_val    = self.map[red_pel['pos'][1]][red_pel['pos'][0]]['cover']
             cover_type   = get_cover_type_int(cover_val)
 
@@ -674,7 +722,7 @@ class NormandyEnv(gym.Env):
             enemy_nearby       = 0 # no enemies alive
             enemy_dist_clamped = 9
         else:
-            enemy_nearby       = 1 if blue_dist <= 4 else 0
+            enemy_nearby       = 1 if blue_dist <= ENEMY_NEARBY_RANGE else 0
             enemy_dist_clamped = min(blue_dist, 9)
 
         # Objective features
@@ -702,7 +750,7 @@ class NormandyEnv(gym.Env):
             red_pel['ammo'] // 20,               # 0–5  ammo level (coarse discretization)
             red_pel['num_tanks'],                # 0–5  number of tanks remaining
             cover_type,                          # 0–2  cover type at current position
-            enemy_nearby,                        # 0–1  whether an enemy is within 4 cells
+            enemy_nearby,                        # 0–1  whether an enemy is within nearby-visibility range
             enemy_dist_clamped,                  # 0–9  distance to nearest enemy (clamped)
             1 if self.red_captured['A'] else 0,  # 0–1  objective A captured
             1 if self.red_captured['B'] else 0,  # 0–1  objective B captured
@@ -738,8 +786,8 @@ class NormandyEnv(gym.Env):
             if nearest_enemy is None:
                 enemy_nearby       = 0  # No enemies alive → default values
                 enemy_dist_clamped = 9
-            else:  # Binary flag if enemy is within engagement range (<= 4 cells)
-                enemy_nearby       = 1 if enemy_dist <= 4 else 0
+            else:  # Binary flag if enemy is within nearby-visibility range
+                enemy_nearby       = 1 if enemy_dist <= ENEMY_NEARBY_RANGE else 0
                 enemy_dist_clamped = min(enemy_dist, 9)
 
             nearest_obj = self._nearest_uncaptured_point(pel)   # Find nearest uncaptured objective
@@ -762,7 +810,7 @@ class NormandyEnv(gym.Env):
                 pel['ammo'] // 20,               # 0-5  ammo level
                 pel['num_tanks'],                # 0-5  tanks remaining
                 cover_type,                      # 0-2  current cell cover
-                enemy_nearby,                    # 0-1  enemy within 4 cells
+                enemy_nearby,                    # 0-1  enemy within nearby-visibility range
                 enemy_dist_clamped,              # 0-9  distance to nearest enemy
                 1 if self.captured['A'] else 0,  # 0-1
                 1 if self.captured['B'] else 0,  # 0-1
@@ -788,6 +836,8 @@ class NormandyEnv(gym.Env):
                 'lw_missions': self.luftwaffe_agent.missions_done,
                 'lw_active':   self.luftwaffe_agent.is_active,
                 'lw_target':   self.luftwaffe_agent.current_target,
+                'lw_respawns': self.luftwaffe_agent.respawn_count,
+                'lw_respawn_eta': self.luftwaffe_agent.respawn_eta,
             }
         return {
             'step':              self.step_count,
@@ -797,12 +847,51 @@ class NormandyEnv(gym.Env):
             'red_captured':      self.red_captured.copy(),
             'red_eps':           self.red_command_agents[0].epsilon,
             'capture_countdown': self.capture_countdown,
+            'winner':            self._last_winner,   # 'blue'/'red'/'draw'/None
             **lw_info,
         }
 
     # goes to next episode
     def increase_episode(self):
         self.episode += 1
+
+    def set_red_epsilon(self, eps: float):
+        # sets the same epsilon for all red commanders (kept for backward compat)
+        eps = float(max(0.05, min(0.70, eps)))
+        for agent in self.red_command_agents:
+            agent.epsilon = eps
+
+    def set_red_epsilons(self, eps_list: list):
+        # sets individual epsilons for the 4 red squads (3 commanders per squad)
+        # eps_list[i] is applied to commanders i*3, i*3+1, i*3+2
+        for squad_idx, eps in enumerate(eps_list):
+            eps = float(max(0.05, min(0.70, eps)))
+            for j in range(3):
+                cmd_idx = squad_idx * 3 + j
+                if cmd_idx < len(self.red_command_agents):
+                    self.red_command_agents[cmd_idx].epsilon = eps
+
+    def get_red_squad_stats(self):
+        # returns per-squad (groups of 3) average epsilon and Q-table mean for the red FM tools
+        stats = []
+        for squad_idx in range(4):
+            agents = []
+            for j in range(3):
+                idx = squad_idx * 3 + j
+                if idx < len(self.red_command_agents):
+                    agents.append(self.red_command_agents[idx])
+            if agents:
+                avg_eps    = sum(a.epsilon for a in agents) / len(agents)
+                avg_q_mean = sum(float(a.q_table.mean()) for a in agents) / len(agents)
+                stats.append({"eps": round(avg_eps, 3), "q_mean": round(avg_q_mean, 4)})
+        return stats
+
+    def set_fm_reward_mults(self, capture: float, kill: float, defend: float):
+        # called by the Field Marshal (Option A) to reshape red reward signal
+        # blue multipliers are applied directly in the training loop
+        self.fm_capture_mult = float(max(0.5, min(2.5, capture)))
+        self.fm_kill_mult    = float(max(0.5, min(2.5, kill)))
+        self.fm_defend_mult  = float(max(0.5, min(2.5, defend)))
 
     # renderers the py game
     # renderers the py game
@@ -1245,7 +1334,7 @@ class NormandyEnv(gym.Env):
 
 
 # implements the wrappers used in wrappers.py to the enviroment
-def make_env(render_mode=None, max_steps=500, fog_of_war=True, action_mask=True, render_every=efg.RENDER_EVERY):
+def make_env(render_mode=None, max_steps=efg.MAX_STEPS, fog_of_war=True, action_mask=True, render_every=efg.RENDER_EVERY):
     from env.wrappers import FogOfWarWrapper, ActionMaskWrapper, EpisodeStatsWrapper # implementing libraries
     
     env = NormandyEnv(render_mode=render_mode, render_every=render_every)

@@ -7,9 +7,14 @@ Artificial Intelligence course project. Multi-agent tactical simulation of the B
 ## Table of Contents
 
 - Description
+- Important Note on Convergence
 - Multi-Agent Architecture
+- New AI Implementations
+  - Luftwaffe Air Support (Markov Chain + PSO)
+  - Field Marshal — Strategic Advisor (smolagents)
 - Project Structure
 - Environment
+- Gymnasium Wrappers
 - Installation
 - Usage
 - Results
@@ -30,6 +35,22 @@ Learning is carried out using tabular Q-Learning, with a hierarchical structure 
 
 ---
 
+## Important Note on Convergence
+
+This is a multi-agent self-play setup with ~64 learning components (commanders + sub-agents from both teams), plus two Field Marshals that periodically change strategy, and a dynamic Luftwaffe unit. So the environment is non-stationary by design.
+
+Because of that, we should not expect a perfect smooth single-agent convergence curve.  
+In this project, we use **practical convergence**:
+- moving averages stabilize in a range (not necessarily at one flat value),
+- episode length reaches a stable band,
+- learned policies become consistent in the policy plots.
+
+Epsilon can look like a saw-tooth and this is expected here: it decays normally, then the Field Marshal updates it (up or down), then decay continues again.
+
+So, oscillation by itself is not a bug in this architecture. The real check is whether long-window behavior is stable and coherent.
+
+---
+
 ## Multi-Agent Architecture
 
 The system is organized into two hierarchical levels:
@@ -37,6 +58,198 @@ The system is organized into two hierarchical levels:
 - **Attack Agent:** Decides whether to attack the nearest enemy within its observation range. It is penalized if an enemy is present and it does not fire; it is rewarded for each successful hit.
 - **Capture Agent:** Moves the platoon toward the designated objective. It is rewarded for getting closer and penalized for moving away.
 - **Defense Agent:** Manages the defense of already captured points. Coordinates the platoon's defensive positioning when assigned to hold an objective.
+- **Luftwaffe Agent:** German air support unit that operates independently of the ground platoons. See dedicated section below.
+- **Field Marshal (×2):** One LLM-based strategic advisor per team. See dedicated section below.
+
+---
+
+## New AI Implementations
+
+### Luftwaffe Air Support — `agents/luftwaffe_agent.py`
+
+The Luftwaffe adds a German JU-87 Stuka that performs bombing runs on Allied platoons. Its logic combines two AI techniques covered in class.
+
+#### 1. Markov Chain (Topic 5) — Operational lifecycle
+
+The aircraft's lifecycle is modelled as a discrete Markov Chain with 6 states:
+
+| State | Code | Description |
+|-------|------|-------------|
+| AVAILABLE | AV | Waiting at base, ready for a mission |
+| INBOUND | IB | Flying toward the target |
+| STRIKING | ST | Executing the bomb run (1 step) |
+| RETURNING | RT | Flying back to base |
+| REARMING | RA | Reloading at base |
+| SHOT_DOWN | SD | Absorbing state — aircraft destroyed |
+
+The transition matrix `T` captures the probabilities between states. The stochastic element is `P_FLAK = 0.04`: a 4% chance per step of being intercepted by anti-aircraft fire while in the `INBOUND` state.
+
+Theoretical statistics computed at initialisation from the chain:
+
+| Metric | Value |
+|--------|-------|
+| Cycle length | 20 steps |
+| P(survive one mission) | 81.5% |
+| Availability | ~5% |
+| Expected missions before shootdown | ~5.4 |
+
+#### 2. Particle Swarm Optimization (Topic 4) — Target selection
+
+Before each mission, `pyswarm.pso()` is used to find the map coordinate `(x, y)` that maximises expected blast damage on enemy platoons.
+
+**Objective function** (negated because PSO minimises):
+
+```
+f(x, y) = Σ HP_enemy × (1 − cover × 0.5) × distance_factor × (tanks / 3)
+```
+
+PSO parameters: 15 particles, 20 iterations, ω=0.5, φp=1.5, φg=1.5.
+
+The blast has a Manhattan radius of 4 cells with a linear falloff. Terrain cover and tank count are taken into account. `pyswarm`'s internal output is suppressed with stdout redirection so it does not pollute the training log.
+
+#### Rendering
+
+The aircraft is rendered as an animated JU-87 sprite (`resources/ju87.png`) that:
+- Interpolates its position between base and target based on the current Markov Chain state and steps elapsed.
+- Rotates to face the flight direction.
+- Draws a semi-transparent path line to its target.
+- Shows a red blast-radius crosshair on the target cell.
+
+A configurable delay (`START_DELAY = 40 steps`) prevents the aircraft from bombing the enemy spawn before platoons have dispersed.
+
+---
+
+### Field Marshal — Strategic Advisor — `agents/field_marshal.py`
+
+Two independent Field Marshals — one per team — act as LLM-based strategic advisors using the **smolagents** `ToolCallingAgent` (Topic 3). They are called every `FM_STRATEGY_INTERVAL = 500` episodes to avoid burning API quota, keeping the last directive active between calls.
+
+If `smolagents` is not installed or the API call fails, both fall back silently to their rule-based equivalents.
+
+#### German Field Marshal (blue team) — `SmolAgentsFieldMarshal`
+
+**Character:** Generalfeldmarschall von Rundstedt.
+
+**Tools provided to the LLM:**
+
+| Tool | Arguments | Purpose |
+|------|-----------|---------|
+| `get_battle_performance` | avg_reward, win_rate, avg_captures, blue_alive_avg | Recent performance report |
+| `get_commander_stats` | blue_epsilons_csv, blue_q_means_csv, red_epsilon | Per-commander Q-table and epsilon status |
+| `get_luftwaffe_report` | missions_done, lw_active | Luftwaffe mission count and aircraft status |
+
+**LLM output format (one line):**
+```
+CAPTURE_MULT=1.5  KILL_MULT=0.8  DEFEND_MULT=1.0
+BLUE_EPS=0.15,0.20,0.15,0.25  RED_EPS=0.35
+RATIONALE=Blue is winning fights but not capping — push capture harder.
+```
+
+**Option A — Dynamic reward multipliers:**
+The LLM outputs a scaling factor for each meta-action type. These are applied directly to the base environment reward in the training loop before the Bellman update:
+
+```python
+base_r = rewards[i] - cfg.P_STEP       # strip step penalty to avoid amplifying it
+r = commander.compute_reward(..., reward_mult=capture_mult)
+r += cfg.P_STEP                         # add back at 1×
+```
+
+A multiplier of `2.0` on captures doubles the gradient signal for capture actions in the Q-table update — much more effective than a flat reward bonus. The step penalty is deliberately excluded from scaling.
+
+**Option B — Per-commander epsilon:**
+After each FM call, each blue commander's epsilon is set individually based on the LLM's assessment of its Q-table status (confident / learning / confused).
+
+| Multiplier range | Epsilon range |
+|-----------------|---------------|
+| [0.5, 2.5] | [0.05, 0.70] |
+
+---
+
+#### Allied Field Marshal (red team) — `AlliedFieldMarshal`
+
+**Character:** General Omar Bradley.
+
+**Tools provided to the LLM:**
+
+| Tool | Arguments | Purpose |
+|------|-----------|---------|
+| `get_allied_battle_performance` | red_win_rate, avg_red_alive, avg_blue_alive | Red team performance report |
+| `get_squad_stats` | squad_epsilons_csv, squad_q_means_csv | Per-squad exploration and Q-value status |
+
+The 12 red commanders are grouped into **4 squads of 3** (squad 0 = cmds 0–2, squad 1 = cmds 3–5, etc.) to match the 4-unit structure of the blue team.
+
+**LLM output format:**
+```
+RED_EPS=0.15,0.20,0.15,0.25  RATIONALE=Squad 2 is getting wiped out — push exploration.
+```
+
+**Option B only (no reward multipliers for red):**
+Red agents receive individual epsilon control per squad. Reward multipliers are not applied to red — giving red the same multipliers as blue when blue needs to capture would make red also learn to capture harder, which is counterproductive for the intended training dynamics.
+
+#### API call budget
+
+| Training length | Calls (German FM) | Calls (Allied FM) | Total |
+|-----------------|-------------------|-------------------|-------|
+| 5 000 episodes | 10 | 10 | 20 |
+| 10 000 episodes | 20 | 20 | 40 |
+
+---
+
+## Project Structure
+
+```
+IA-normandy-simulation-RL/
+├── .gitignore
+├── requirements.txt
+├── training_and_eval.py            # Training loop
+├── readme.md
+├── IA-normandy-simulation-RL.zip   # Backup/export copy
+│
+├── agents/
+│   ├── __init__.py
+│   ├── agents_config.py            # Shared agent constants
+│   ├── command_agent.py            # Commander Q-Learning agent
+│   ├── attack_agent.py             # Attack sub-agent
+│   ├── defense_agent.py            # Defense sub-agent
+│   ├── capture_agent.py            # Capture sub-agent
+│   ├── field_marshal.py            # German + Allied Field Marshal logic
+│   └── luftwaffe_agent.py          # Luftwaffe (Markov Chain + PSO)
+│
+├── env/
+│   ├── __init__.py
+│   ├── env_config.py               # Main configuration constants
+│   ├── normandy_env.py             # Main Gymnasium environment
+│   ├── wrappers.py                 # Gymnasium wrappers
+│   ├── combat_logic.py             # Distance, attack and cover helpers
+│   ├── map_generator.py            # Terrain and objective map generation
+│   └── units.py                    # Unit utility functions
+│
+├── utils/
+│   ├── __init__.py
+│   └── metrics_and_plotter.py      # EpisodeTracker + all plots
+│
+├── resources/
+│   ├── ju87.png
+│   ├── tiger.png
+│   ├── sherman.png
+│   ├── mapaNormandia.png
+│   └── Estructura de la practica(inicial).png
+│
+├── readme_resources/               # Static images used inside README
+│   ├── terminal.png
+│   ├── render_ex.png
+│   ├── training_curves.png
+│   ├── epsilon_decay.png
+│   ├── command_agent_policy.png
+│   ├── attack_defense_policy.png
+│   └── capture_agent_policy.png
+│
+└── results/                        # Generated at the end of training runs
+    ├── training_curves.png
+    ├── epsilon_decay.png
+    ├── command_agent_policy.png
+    ├── attack_defense_policy.png
+    └── capture_agent_policy.png
+```
 
 ---
 
@@ -160,7 +373,11 @@ We have used the following:
 2. (Recommended) Create a virtual environment
 3. Install dependencies
 
-**Main dependencies:** `gymnasium`, `pygame`, `numpy`, `matplotlib`
+**Main dependencies:** `gymnasium`, `pygame`, `numpy`, `matplotlib`, `pyswarm`
+
+**Optional (for LLM Field Marshal):** `smolagents`, `huggingface_hub`
+
+If `smolagents` is not installed the simulation runs normally using the rule-based Field Marshal fallback — no API key required.
 
 ---
 
@@ -190,9 +407,18 @@ Displays the total reward per episode (light blue) along with its 50-episode mov
 
 ![Training performance](readme_resources/training_curves.png)
 
+**How we interpret convergence in this project (important):**
+
+We check practical convergence, not perfect flat curves:
+- stable moving averages (short and long windows),
+- stable episode length band,
+- policy maps that stop changing drastically.
+
+In our setup, some oscillation is normal because both teams keep learning and the Field Marshal periodically adjusts exploration and priorities.
+
 **Epsilon Decay – Exploration vs Exploitation:**
 
-Evolution of epsilon for each type of agent throughout training. The capture agent (orange) decays more slowly (decay = 0.9995) than the others (decay = 0.999), as it requires more exploration to learn navigation routes.
+Evolution of epsilon for each type of agent throughout training. In this project, epsilon is not only decayed; it is also adjusted by the Field Marshal at each strategy update. So a saw-tooth pattern is normal: decay phase -> FM adjustment -> decay phase.
 
 ![Epsilon decay](readme_resources/epsilon_decay.png)
 
@@ -222,11 +448,10 @@ The plots are automatically generated at the end of training using `metrics_and_
 
 ## Future Work (ideas)
 
-- **Smolagents integration:** Replace the current Field Marshal Agent with an LLM-based agent using the Smolagents library, enabling more complex strategic decision-making and high-level reasoning.
 - **Supply truck:** Implement a supply truck controlled directly by the Field Marshal (LLM), autonomously managing dynamic resupply of platoons based on the current state of the battlefield.
-- **Luftwaffe support:** In case we have enough time, incorporate German air support as an additional unit controlled by the Field Marshal, adding a new tactical dimension to combat.
 - **Map expansion:** Scale the grid from 40×40 to a larger size to accommodate new air and ground units, with procedural generation adapted to the new dimensions.
 - **Render improvements:** Enhance the Pygame interface with HP indicators over sprites, a real-time statistics panel, persistent smoke effects and per-agent status visualization.
+- **Neural network policy:** Replace tabular Q-Learning with a DQN or PPO policy for the commander agents, using the existing `ObsNormWrapper` for input normalisation.
 
 ---
 
