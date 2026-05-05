@@ -16,7 +16,7 @@ META_CAPTURE  = 0
 META_ATTACK   = 1
 META_DEFENSE  = 2
 META_RESUPPLY = 3
-ATTACK_RANGE = 3 # same as ATTACK_RANGE in combat_logic.py
+ATTACK_RANGE = 8 # keep aligned with env attack range
 
 # -------------- defense agent configuration -----------------
 # cover types (only 3 to test)

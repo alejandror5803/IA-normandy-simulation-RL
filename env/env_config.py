@@ -1,6 +1,6 @@
 # -------- combat_logic ----------
-ATTACK_RANGE    = 3
-TIGER_DAMAGE    = 30   # Tiger tank — historically superior firepower
+ATTACK_RANGE    = 8
+TIGER_DAMAGE    = 40   # Tiger tank — historically superior firepower
 SHERMAN_DAMAGE  = 20   # Sherman tank — baseline
 DAMAGE_PER_ATTACK = SHERMAN_DAMAGE  # default kept for red team
 
@@ -8,7 +8,7 @@ DAMAGE_PER_ATTACK = SHERMAN_DAMAGE  # default kept for red team
 NUM_BLUE = 4
 NUM_RED  = 12
 MAP_SIZE = 100 # 25
-MAX_STEPS = 500 # X LO eliminamos porque lo gestiona TimeLimit
+MAX_STEPS = 800 # better fit for 100x100 map (movement + capture + counterplay)
 
 # commander meta-actions: the commander decides WHICH sub-agent takes action on the peloton this step
 # movement direction is never chosen by the commander directly — the capture_agent handles that
@@ -28,6 +28,8 @@ P_STEP          = -1.0  # small relative to capture/win rewards so shaping signa
 
 # observation vector size (one per blue peloton)
 OBS_SIZE = 16
+# "enemy_nearby" is visibility-level proximity, not direct fire range
+ENEMY_NEARBY_RANGE = 12
 
 # seed for the map
 SEED = 482 # 42
@@ -37,24 +39,58 @@ RENDER_EVERY = 1000
 
 # metrics / plotter
 MOVING_AVG_WINDOW = 50
+MOVING_AVG_WINDOW_LONG = 200
 PLOTS_SAVE_PATH   = "results"
 
-CAPTURE_OVERTIME = 30  # steps the enemy gets to reconquer after all 3 points are taken
+CAPTURE_OVERTIME = 40  # steps the enemy gets to reconquer after all 3 points are taken
 
 PELOTON_AMMO = 25
 PELOTON_FUEL = 500
 
-TIGER_PELOTON_HP = 600
-SHERMAN_PELOTON_HP = 300
+TIGER_PELOTON_HP = 650
+SHERMAN_PELOTON_HP = 500
 
 # -------- Luftwaffe (German air support) ----------
 LUFTWAFFE_ENABLED      = True   # toggle to disable the Luftwaffe entirely
-LUFTWAFFE_BLAST_RADIUS = 4      # Manhattan-distance radius of the bomb
-LUFTWAFFE_BASE_DAMAGE  = 120    # maximum damage at ground zero (before cover/falloff)
+LUFTWAFFE_BLAST_RADIUS = 5      # Manhattan-distance radius of the bomb
+LUFTWAFFE_BASE_DAMAGE  = 400    # maximum damage at ground zero (before cover/falloff)
+LUFTWAFFE_START_DELAY  = 50     # steps before first strike can be ordered
+LUFTWAFFE_REARM_MIN_STEPS = 15  # min cooldown at base after returning
+LUFTWAFFE_REARM_MAX_STEPS = 25  # max cooldown at base after returning
+LUFTWAFFE_RESPAWN_STEPS = 200   # if shot down, wait this many env steps to return
+LUFTWAFFE_MAX_RESPAWNS_PER_EPISODE = 1  # safety cap to avoid infinite air pressure
 R_LUFTWAFFE_HIT        = 40     # reward per blue commander for each Luftwaffe hit
 R_LUFTWAFFE_KILL       = 100    # extra reward when a red platoon is destroyed by air
 
 # -------- SmolAgents Field Marshal ----------
-FM_STRATEGY_INTERVAL   = 500    # episodes between LLM strategy calls
-FM_STRATEGY_BONUS      = 0.8    # reward bonus when a commander follows FM priority action
-FM_MODEL_ID            = "Qwen/Qwen2.5-72B-Instruct"   # HuggingFace model for the FM
+FM_STRATEGY_INTERVAL = 1000  # episodes between LLM strategy calls
+FM_WARMUP_EPISODES   = 1500  # do not call FM before this episode
+
+# LLM provider: "hf" (HuggingFace) or "groq" (free tier, 1000 req/day, much faster)
+#FM_PROVIDER = "groq"
+FM_PROVIDER = "hf"
+
+# HuggingFace provider — get token at https://huggingface.co/settings/tokens
+FM_MODEL_ID = "Qwen/Qwen2.5-72B-Instruct"
+HF_TOKEN    = "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"
+
+# https://console.groq.com/keys
+# switch to "groq" above if HF rate-limits you
+GROQ_MODEL_ID = "llama-3.3-70b-versatile"
+GROQ_API_KEY  = "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"
+
+# default reward multipliers (Option A) - LLM overrides these every N episodes
+FM_DEFAULT_CAPTURE_MULT = 1.0
+FM_DEFAULT_KILL_MULT    = 1.0
+FM_DEFAULT_DEFEND_MULT  = 1.0
+
+# -------- Epsilon decay tuning ----------
+# Slower decay helps on this project because many agents learn in parallel
+EPS_DECAY_BLUE_COMMAND  = 0.9995
+EPS_DECAY_BLUE_ATTACK   = 0.9995
+EPS_DECAY_BLUE_DEFENSE  = 0.9995
+EPS_DECAY_BLUE_CAPTURE  = 0.9998
+EPS_DECAY_RED_COMMAND   = 0.9995
+EPS_DECAY_RED_ATTACK    = 0.9995
+EPS_DECAY_RED_DEFENSE   = 0.9995
+EPS_DECAY_RED_CAPTURE   = 0.9998

@@ -78,7 +78,8 @@ class attack_agent:
             else:
                 reward = -1.0  # enemy visible and didnt shoot
         else:
-            reward = 0.0  # no enemy, neutral
+            # small penalty: shooting blindly should not look as good as waiting
+            reward = -0.3 if action == SHOOT else 0.0
  
         return reward
  

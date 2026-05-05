@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import env.env_config as cfg
 
 MOVING_AVG_WINDOW = cfg.MOVING_AVG_WINDOW
+MOVING_AVG_WINDOW_LONG = cfg.MOVING_AVG_WINDOW_LONG
 PLOTS_SAVE_PATH   = cfg.PLOTS_SAVE_PATH
 
 
@@ -18,6 +19,7 @@ class EpisodeTracker:
         self.red_alive_end     = []
         self.blue_captures_end = []
         self.red_captures_end  = []
+        self.winner_end        = []   # 'blue', 'red', 'draw' or None per episode
 
         # epsilon at end of episode, peloton 0 as representative for each agent type
         self.blue_cmd_epsilon = []
@@ -35,6 +37,7 @@ class EpisodeTracker:
         self.red_alive_end.append(info['red_alive'])
         self.blue_captures_end.append(sum(1 for v in info['captured'].values() if v))
         self.red_captures_end.append(sum(1 for v in info['red_captured'].values() if v))
+        self.winner_end.append(info.get('winner', None))
 
         self.blue_cmd_epsilon.append(commanders[0].epsilon)
         self.blue_atk_epsilon.append(env_raw.attack_agents[0].epsilon)
@@ -66,9 +69,13 @@ def plot_training_curves(tracker, save_path=PLOTS_SAVE_PATH, window=MOVING_AVG_W
 
     # --- 1. reward per episode ---
     avg_rewards = _moving_avg(tracker.total_rewards, window)
+    long_window = min(MOVING_AVG_WINDOW_LONG, len(tracker.total_rewards))
+    avg_rewards_long = _moving_avg(tracker.total_rewards, long_window)
     axes[0].plot(episodes, tracker.total_rewards, alpha=0.2, color='steelblue')
     axes[0].plot(episodes, avg_rewards, color='steelblue', linewidth=2,
                  label=f'moving avg ({window} ep)')
+    axes[0].plot(episodes, avg_rewards_long, color='midnightblue', linewidth=2,
+                 linestyle='--', label=f'moving avg ({long_window} ep)')
     axes[0].set_title('Reward per episode')
     axes[0].set_xlabel('Episode')
     axes[0].set_ylabel('Total reward')
@@ -77,9 +84,12 @@ def plot_training_curves(tracker, save_path=PLOTS_SAVE_PATH, window=MOVING_AVG_W
 
     # --- 2. episode duration (steps) ---
     avg_steps = _moving_avg(tracker.episode_steps, window)
+    avg_steps_long = _moving_avg(tracker.episode_steps, long_window)
     axes[1].plot(episodes, tracker.episode_steps, alpha=0.2, color='darkorange')
     axes[1].plot(episodes, avg_steps, color='darkorange', linewidth=2,
                  label=f'moving avg ({window} ep)')
+    axes[1].plot(episodes, avg_steps_long, color='saddlebrown', linewidth=2,
+                 linestyle='--', label=f'moving avg ({long_window} ep)')
     axes[1].set_title('Episode duration (steps)')
     axes[1].set_xlabel('Episode')
     axes[1].set_ylabel('Steps')
@@ -88,9 +98,12 @@ def plot_training_curves(tracker, save_path=PLOTS_SAVE_PATH, window=MOVING_AVG_W
 
     # --- 3. TD error (training error) ---
     avg_td = _moving_avg(tracker.cmd_td_errors, window)
+    avg_td_long = _moving_avg(tracker.cmd_td_errors, long_window)
     axes[2].plot(episodes, tracker.cmd_td_errors, alpha=0.2, color='crimson')
     axes[2].plot(episodes, avg_td, color='crimson', linewidth=2,
                  label=f'moving avg ({window} ep)')
+    axes[2].plot(episodes, avg_td_long, color='darkred', linewidth=2,
+                 linestyle='--', label=f'moving avg ({long_window} ep)')
     axes[2].set_title('Command agent — TD error')
     axes[2].set_xlabel('Episode')
     axes[2].set_ylabel('Mean |TD error|')

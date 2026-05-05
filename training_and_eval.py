@@ -79,7 +79,7 @@ def train(episodes=5000, render_every=1000):
     red_fm         = AlliedFieldMarshal()
     red_strategy   = red_fm.current_strategy
 
-    fm_next_call   = cfg.FM_STRATEGY_INTERVAL
+    fm_next_call   = max(cfg.FM_STRATEGY_INTERVAL, cfg.FM_WARMUP_EPISODES)
 
     for ep in range(episodes):
         obs, _ = env.reset()
@@ -114,7 +114,10 @@ def train(episodes=5000, render_every=1000):
             done          = terminated or truncated
 
         for commander in commanders:
-            commander.decay_epsilon(decay_rate=0.999, min_epsilon=0.05)
+            commander.decay_epsilon(
+                decay_rate=cfg.EPS_DECAY_BLUE_COMMAND,
+                min_epsilon=0.05,
+            )
 
         cmd_td_mean = sum(ep_td_errors) / len(ep_td_errors) if ep_td_errors else 0.0
         tracker.record(total_reward, info['step'], cmd_td_mean, info, commanders, env.unwrapped)
@@ -183,4 +186,4 @@ def train(episodes=5000, render_every=1000):
 
 
 if __name__ == "__main__":
-    train(episodes=10000, render_every=500)
+    train(episodes=10000, render_every=9999)

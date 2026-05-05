@@ -3,7 +3,7 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 
-from env.env_config import OBS_SIZE, NUM_BLUE
+from env.env_config import OBS_SIZE, NUM_BLUE, ENEMY_NEARBY_RANGE
 
 # max possible value for each of the 16 obs features — used by ObsNormWrapper
 OBS_MAX_VALS = np.array([
@@ -111,7 +111,7 @@ class FogOfWarWrapper(gym.ObservationWrapper):
     ENEMY_NEARBY_IDX = 5
     ENEMY_DIST_IDX   = 6
 
-    def __init__(self, env, visibility_range=8):
+    def __init__(self, env, visibility_range=ENEMY_NEARBY_RANGE):
         super().__init__(env)
         self.visibility_range = visibility_range
 

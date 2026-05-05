@@ -89,7 +89,7 @@ class command_agent:
             actions.append(self.choose_action(peloton_obs))
         return actions
 
-    def compute_reward(self, obs_before, obs_after, action, env_reward):
+    def compute_reward(self, obs_before, obs_after, action, env_reward, reward_mult=1.0):
         """
         Quantificates an reward depending on the decision
 
@@ -99,13 +99,16 @@ class command_agent:
         action: latest action of the Agent
         reward: quantitative value
         env_reward = The reward in each iteration
+        reward_mult = scaling factor from Field Marshal (Option A reward shaping)
 
         Return:
            The reward based on the action of the Agent.
         
         """
 
-        reward = env_reward
+        # reward_mult is set by the Field Marshal every FM_STRATEGY_INTERVAL episodes
+        # it scales the base env reward to steer the Q-agents toward the priority action
+        reward = env_reward * reward_mult
 
         enemy_nearby = int(obs_before[5])
         enemy_dist   = int(obs_before[6])
