@@ -67,8 +67,8 @@ FM_STRATEGY_INTERVAL = 1000  # episodes between LLM strategy calls
 FM_WARMUP_EPISODES   = 1500  # do not call FM before this episode
 
 # LLM provider: "hf" (HuggingFace) or "groq" (free tier, 1000 req/day, much faster)
-#FM_PROVIDER = "groq"
-FM_PROVIDER = "hf"
+FM_PROVIDER = "groq"
+#FM_PROVIDER = "hf"
 
 # HuggingFace provider — get token at https://huggingface.co/settings/tokens
 FM_MODEL_ID = "Qwen/Qwen2.5-72B-Instruct"

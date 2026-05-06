@@ -286,6 +286,7 @@ Sample of the map used:
 |----------------|----------|---------------|------------|------------------------------------------|
 | Blue (Tigers)  | 4        | 6             | 600        | ![Tiger](resources/tiger.png)            |
 | Red (Shermans) | 12 (3:1) | 3             | 300        | ![Sherman](resources/sherman.png)        |
+| LF (Luftwaffe) | 2        | 1             | N/A        | ![Luftwaffe](resources/ju87.png)         |
 
 When HP drops below 100, a tank is destroyed and the platoon's firepower decreases proportionally.
 
