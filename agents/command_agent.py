@@ -14,12 +14,12 @@ ATTACK_RANGE = cfg.ATTACK_RANGE
 
 class command_agent:
 
-    def __init__(self, lr=0.1, gamma=0.9, epsilon=0.6): # 0.3 epsilon inicial para fomentar exploración, luego se va decayendo
+    def __init__(self, lr=0.1, gamma=0.9, epsilon=0.6):
         """
-        Inizialites the class o the capture agent
-    
-        Defining the parameters, like the Leraning Rate, gamma & epsilon.
-        All as a float. As well as the number of states and actions possibles for the q table
+        Initializes the command agent.
+
+        Defining the parameters, like the Learning Rate, gamma & epsilon.
+        All as a float. As well as the number of states and actions possible for the Q-table.
         """
         self.lr      = lr
         self.gamma   = gamma
@@ -91,19 +91,17 @@ class command_agent:
 
     def compute_reward(self, obs_before, obs_after, action, env_reward, reward_mult=1.0):
         """
-        Quantificates an reward depending on the decision
+        Calculates the reward depending on the decision taken.
 
         Parameters:
         obs_before: observation at the current state
         obs_after: observation after the current state
-        action: latest action of the Agent
-        reward: quantitative value
-        env_reward = The reward in each iteration
-        reward_mult = scaling factor from Field Marshal (Option A reward shaping)
+        action: latest action of the agent
+        env_reward: the environment reward for this step
+        reward_mult: scaling factor from Field Marshal (Option A reward shaping)
 
         Return:
-           The reward based on the action of the Agent.
-        
+           The shaped reward based on the action of the agent.
         """
 
         # reward_mult is set by the Field Marshal every FM_STRATEGY_INTERVAL episodes
@@ -142,15 +140,13 @@ class command_agent:
 
     def update(self, obs_before, action, reward, obs_after):
         """
-        Updates the state of the Agent
+        Updates the Q-table with a Bellman step.
 
         Parameters:
-        
         obs_before: observation at the current state
-        action: latest action of the Agent
+        action: latest action of the agent
         reward: quantitative value
         obs_after: observation after the current state
-        
         """
         state      = self._obs_to_state(obs_before)
         next_state = self._obs_to_state(obs_after)
@@ -163,12 +159,10 @@ class command_agent:
 
     def decay_epsilon(self, decay_rate=0.995, min_epsilon=0.05):
         """
-        Chooses the maximum epsilon between the min epsilon 
-        and the current * the decay rate
+        Decays epsilon by decay_rate, clamped to min_epsilon.
 
         Parameters:
-        decay_rate=0.995 
-        min_epsilon=0.05
-
+        decay_rate: multiplicative decay factor (default 0.995)
+        min_epsilon: lower bound for epsilon (default 0.05)
         """
         self.epsilon = max(min_epsilon, self.epsilon * decay_rate)

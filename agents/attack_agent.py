@@ -11,11 +11,10 @@ class attack_agent:
     
     def __init__(self, lr=0.1, gamma=0.9, epsilon=0.2):
         """
-        Inizialate the Attack Agent
+        Initializes the Attack Agent.
 
-        Defining the parameters, like the Leraning Rate, gamma & epsilon.
-        All as a float. Including the q table values.
-
+        Defining the parameters, like the Learning Rate, gamma & epsilon.
+        All as a float. Including the Q-table values.
         """
         self.lr = lr
         self.gamma = gamma
@@ -26,16 +25,14 @@ class attack_agent:
         self.q_table = np.zeros((2, 2))
  
     def get_state(self, enemies_in_range):
-
         """
-        Function gets the state of the enemies if they are near.
+        Returns the attack state: 0 if no enemies in range, 1 if at least one is.
 
         Parameters:
-        enemies_in_range: It gives you an alert of nearness.
+        enemies_in_range: list of enemy platoons within attack range.
 
         Return:
-            It returns in form of int 0 or 1, depending of the enemy.
-
+            0 or 1 as an integer.
         """
         if len(enemies_in_range) > 0:
             return 1
@@ -43,13 +40,13 @@ class attack_agent:
  
     def choose_action(self, state):
         """
-        Chooses each action deppending of the q table
+        Chooses an action depending on epsilon-greedy policy over the Q-table.
 
         Parameters:
-            state: in the q table
+            state: current state index in the Q-table.
 
         Return:
-            It returns an int from the index of the selected action
+            An integer index of the selected action.
         """
 
         if random.random() < self.epsilon:
@@ -60,17 +57,15 @@ class attack_agent:
  
     def compute_reward(self, state, action, hit_confirmed=False):
         """
-        Quantificates an reward depending on the decision
+        Calculates the reward depending on the decision taken.
 
         Parameters:
-            State : of the agent.
-            action : what has the agent decided
-            hit confirmated: Has he hit the enemy? 
-        
+            state: current state of the agent.
+            action: action chosen by the agent.
+            hit_confirmed: whether the shot actually hit an enemy.
 
         Return:
-           The reward based on the action of the Agent.
-        
+           The reward based on the action of the agent.
         """
         if state == 1:  # there was an enemy
             if action == SHOOT:
@@ -85,13 +80,13 @@ class attack_agent:
  
     def update(self, state, action, reward, next_state):
         """
-        Updates the state of the Agent
+        Updates the Q-table with a Bellman step.
 
         Parameters:
-        state: Current state of the Agent
-        action: latest action of the Agent
-        Next_state: The best move for the Agent 
-        
+        state: current state of the agent.
+        action: latest action of the agent.
+        reward: reward received.
+        next_state: state observed after taking the action.
         """
         best_next_q = np.max(self.q_table[next_state]) # Chooses the best next step in the q table
         old_q = self.q_table[state][action] # Saves the recent state
@@ -99,12 +94,10 @@ class attack_agent:
  
     def decay_epsilon(self, decay_rate=0.995, min_epsilon=0.05):
         """
-        Chooses the maximum epsilon between the min epsilon 
-        and the current * the decay rate
+        Decays epsilon by decay_rate, clamped to min_epsilon.
 
         Parameters:
-        decay_rate=0.995 
-        min_epsilon=0.05
-
+        decay_rate: multiplicative decay factor (default 0.995).
+        min_epsilon: lower bound for epsilon (default 0.05).
         """
         self.epsilon = max(min_epsilon, self.epsilon * decay_rate)

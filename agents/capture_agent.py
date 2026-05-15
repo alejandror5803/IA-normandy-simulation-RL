@@ -13,10 +13,10 @@ STAY = cfg.STAY
 # Defines the class
 class capture_agent:
     """
-    Inizialites the class o the capture agent
-    
-     Defining the parameters, like the Leraning Rate, gamma & epsilon.
-        All as a float. Also defining the actions and states possible inizialising the q table.
+    Initializes the Capture Agent.
+
+    Defining the parameters, like the Learning Rate, gamma & epsilon.
+    All as a float. Also defining the actions and states possible, initializing the Q-table.
     """
     def __init__(self, lr=0.1, gamma=0.9, epsilon=0.3):
         self.lr = lr
@@ -37,15 +37,14 @@ class capture_agent:
         self.prev_prev_position = None
 
     def _get_state_index(self, agent_pos, objective_pos):
-
         """
-        It gives the capture agent where to direct himself so he can go to the capture point.
-        
-        Parameters:
-        Agent_pos: Where he is at the moment
-        objectice_pos: Where the objective is
+        Returns the state index encoding the direction and distance to the objective.
 
-        Return the value of in which direction is that agent in respect of the Agent
+        Parameters:
+        agent_pos: current position of the platoon.
+        objective_pos: position of the target capture point.
+
+        Returns the state index (0–26) encoding direction and distance.
         """
         dx = objective_pos[0] - agent_pos[0]
         dy = objective_pos[1] - agent_pos[1]
@@ -76,14 +75,14 @@ class capture_agent:
 
     def choose_action(self, agent_pos, objective_pos):
         """
-        Chooses each action deppending of the q table
+        Chooses an action depending on epsilon-greedy policy over the Q-table.
 
         Parameters:
-        Agent_pos: Where he is at the moment
-        objectice_pos: Where the objective is
+        agent_pos: current position of the platoon.
+        objective_pos: position of the target capture point.
 
         Return:
-            It returns an int from the index of the selected action
+            An integer index of the selected action.
         """
          
         state = self._get_state_index(agent_pos, objective_pos)
@@ -93,16 +92,15 @@ class capture_agent:
 
     def compute_reward(self, old_pos, new_pos, objective_pos):
         """
-        Quantificates an reward depending on the decision
+        Calculates the reward depending on movement relative to the objective.
 
         Parameters:
-        old_pos: last position
-        new_pos: nex position
-        objectice_pos: Where the objective is
+        old_pos: position before the action.
+        new_pos: position after the action.
+        objective_pos: position of the target capture point.
 
         Return:
-           The reward based on the action of the Agent.
-        
+           The reward based on the action of the agent.
         """
         old_dist = abs(objective_pos[0] - old_pos[0]) + abs(objective_pos[1] - old_pos[1])
         new_dist = abs(objective_pos[0] - new_pos[0]) + abs(objective_pos[1] - new_pos[1])
@@ -141,15 +139,14 @@ class capture_agent:
 
     def update(self, agent_pos, objective_pos, action, reward, new_agent_pos):
         """
-        Updates the state of the Agent
+        Updates the Q-table with a Bellman step.
 
         Parameters:
-        Agent_pos: Where he is at the moment
-        objectice_pos: Where the objective is
-        action: latest action of the Agent
-        reward: quantitative value
-        New_agent_pos: How is positionated.
-        
+        agent_pos: position before the action.
+        objective_pos: position of the target capture point.
+        action: latest action of the agent.
+        reward: reward received.
+        new_agent_pos: position after the action.
         """
         state = self._get_state_index(agent_pos, objective_pos)
         next_state = self._get_state_index(new_agent_pos, objective_pos)
@@ -160,12 +157,10 @@ class capture_agent:
 
     def decay_epsilon(self, decay_rate=0.995, min_epsilon=0.05):
         """
-        Chooses the maximum epsilon between the min epsilon 
-        and the current * the decay rate
+        Decays epsilon by decay_rate, clamped to min_epsilon.
 
         Parameters:
-        decay_rate=0.995 
-        min_epsilon=0.05
-
+        decay_rate: multiplicative decay factor (default 0.995).
+        min_epsilon: lower bound for epsilon (default 0.05).
         """
         self.epsilon = max(min_epsilon, self.epsilon * decay_rate)

@@ -19,10 +19,10 @@ class defense_agent:
 
     def __init__(self, lr=0.1, gamma=0.9, epsilon=0.2):
         """
-        Inizialites the class o the capture agent
-    
-        Defining the parameters, like the Leraning Rate, gamma & epsilon.
-        All as a float. As well as the number of states and actions possibles for the q table
+        Initializes the Defense Agent.
+
+        Defining the parameters, like the Learning Rate, gamma & epsilon.
+        All as a float. As well as the number of states and actions possible for the Q-table.
         """
         self.lr = lr
         self.gamma = gamma
@@ -47,18 +47,17 @@ class defense_agent:
 
     def compute_reward(self, enemy_nearby, cover_type, action, got_hit, next_cover_type=0):
         """
-        Quantificates an reward depending on the decision
+        Calculates the reward depending on the decision taken.
 
         Parameters:
-        enemy_nearby: Enemigo de forma cercana?
-        cover_type: What cover is he using
-        action: latest action of the Agent
-        got_hit: Did the agent got hit?
+        enemy_nearby: whether an enemy is within nearby range (0 or 1).
+        cover_type: current cover type at the platoon's position.
+        action: latest action of the agent.
+        got_hit: whether the platoon took damage this step.
+        next_cover_type: cover type after the action was taken.
 
-        
         Return:
-           The reward based on the action of the Agent.
-        
+           The reward based on the action of the agent.
         """
         
         
@@ -85,20 +84,16 @@ class defense_agent:
         return reward
 
     def update(self, enemy_nearby, cover_type, action, reward, next_enemy_nearby, next_cover_type):
-        
         """
-        Updates the state of the Agent
+        Updates the Q-table with a Bellman step.
 
         Parameters:
-        
-        enemy_nearby: is ther any?
-        cover_type: Which cover is near the agent
-        action: latest action of the Agent
-        reward: quantitative value
-        next_enemy_nearby: the distance
-        nxt_cover_type: the nearbiest cover type
-        
-        
+        enemy_nearby: whether an enemy was nearby before the action.
+        cover_type: cover type before the action.
+        action: latest action of the agent.
+        reward: reward received.
+        next_enemy_nearby: whether an enemy is nearby after the action.
+        next_cover_type: cover type after the action.
         """
         state = self._state_index(enemy_nearby, cover_type)
         next_state = self._state_index(next_enemy_nearby, next_cover_type)
@@ -109,12 +104,10 @@ class defense_agent:
 
     def decay_epsilon(self, decay_rate=0.995, min_epsilon=0.05):
         """
-        Chooses the maximum epsilon between the min epsilon 
-        and the current * the decay rate
+        Decays epsilon by decay_rate, clamped to min_epsilon.
 
         Parameters:
-        decay_rate=0.995 
-        min_epsilon=0.05
-
+        decay_rate: multiplicative decay factor (default 0.995).
+        min_epsilon: lower bound for epsilon (default 0.05).
         """
         self.epsilon = max(min_epsilon, self.epsilon * decay_rate)
