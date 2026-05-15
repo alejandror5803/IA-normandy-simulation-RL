@@ -77,7 +77,9 @@ class NormandyEnv(gym.Env):
         self.capture_agents = [capture_agent() for _ in range(NUM_BLUE)]
 
         # one set of sub-agents per red peloton (same structure as blue)
-        self.red_command_agents = [command_agent() for _ in range(NUM_RED)]
+        # lower initial epsilon (0.4) because 12 parallel agents already provide
+        # sufficient exploration diversity without needing high per-agent randomness
+        self.red_command_agents = [command_agent(epsilon=0.4) for _ in range(NUM_RED)]
         self.red_attack_agents  = [attack_agent()  for _ in range(NUM_RED)]
         self.red_defense_agents = [defense_agent() for _ in range(NUM_RED)]
         self.red_capture_agents = [capture_agent() for _ in range(NUM_RED)]
@@ -96,7 +98,7 @@ class NormandyEnv(gym.Env):
         #top middle
         self.fixed_red_starts  = [self._find_free_cell(MAP_SIZE//2 - 3, MAP_SIZE//2 + 3, 0, 6) for _ in range(NUM_RED)]
 
-        # initiates the peloton,their points, the points to captura and their steps
+        # Initializes pelotons, capture points, and step counter
         self.blue_pelotons  = []
         self.red_pelotons   = []
         self.points         = {}
@@ -122,7 +124,7 @@ class NormandyEnv(gym.Env):
 
         self.reset()
 
-    # Each peloton consists of this caracteristics when it is created
+    # Each peloton consists of these characteristics when it is created
     def _make_peloton(self, x, y, team, pid, hp=500, num_tanks=5):
         return {
             'id':        pid,
@@ -135,13 +137,13 @@ class NormandyEnv(gym.Env):
         }
 
     
-    # verification of a specific position in passable (transitable is bool)
+    # Verifies if a specific position is passable (not water/wall)
     def _is_passable(self, x, y):
         if not (0 <= x < MAP_SIZE and 0 <= y < MAP_SIZE):
             return False
         return self.map[y][x]['type'] not in IMPASSABLE
 
-    # trys no find an free cell randomly
+    # Tries to find a free cell randomly within bounds
     def _find_free_cell(self, x_min, x_max, y_min, y_max):
         for _ in range(500):
             x = random.randint(x_min, x_max)
@@ -235,7 +237,7 @@ class NormandyEnv(gym.Env):
             atk_a = self.attack_agents[i].choose_action(ps['atk_state'])
             def_a = self.defense_agents[i].choose_action(ps['enemy_nearby'], ps['cover_type'])
 
-            # it gives the value of where the nearest object is
+            # Find the nearest uncaptured objective for this platoon
             nearest_obj = self._nearest_uncaptured_point(pel)
 
 
@@ -355,6 +357,17 @@ class NormandyEnv(gym.Env):
 
             psr  = pre_red[i]
             meta = self.red_command_agents[i].choose_action(psr['obs_vec'])
+
+            # Mirror of ActionMaskWrapper: redirect invalid red actions before execution
+            # META_ATTACK  invalid if platoon has no ammo
+            # META_RESUPPLY invalid if platoon is not standing on a supply point
+            if meta == META_ATTACK and red_pel['ammo'] <= 0:
+                meta = META_CAPTURE
+            elif meta == META_RESUPPLY:
+                on_supply = any(red_pel['pos'] == list(pd['pos']) for pd in self.points.values())
+                if not on_supply:
+                    meta = META_CAPTURE
+
             red_meta_taken[i] = meta
 
             atk_a = self.red_attack_agents[i].choose_action(psr['atk_state'])
@@ -894,7 +907,6 @@ class NormandyEnv(gym.Env):
         self.fm_defend_mult  = float(max(0.5, min(2.5, defend)))
 
     # renderers the py game
-    # renderers the py game
     def _render(self):
         
         if self.render_mode != "human":
@@ -1007,15 +1019,14 @@ class NormandyEnv(gym.Env):
             dmg_frac = 1.0 - (pel['hp'] / max_hp)
             # more damage → more smoke, more often
             if dmg_frac > 0.2 and random.random() < dmg_frac * 0.6:
-                import random as _rnd
                 self.smoke_particles.append({
-                    'x':     pel['pos'][0] * cell_size + cell_size // 2 + _rnd.randint(-4, 4),
-                    'y':     pel['pos'][1] * cell_size + _rnd.randint(-4, 2),
-                    'life':  _rnd.randint(12, 24),
+                    'x':     pel['pos'][0] * cell_size + cell_size // 2 + random.randint(-4, 4),
+                    'y':     pel['pos'][1] * cell_size + random.randint(-4, 2),
+                    'life':  random.randint(12, 24),
                     'max':   24,
-                    'r':     _rnd.randint(cell_size // 4, cell_size // 2),
-                    'dx':    _rnd.uniform(-0.3, 0.3),
-                    'dy':    _rnd.uniform(-0.8, -0.3),
+                    'r':     random.randint(cell_size // 4, cell_size // 2),
+                    'dx':    random.uniform(-0.3, 0.3),
+                    'dy':    random.uniform(-0.8, -0.3),
                 })
 
         # draw and age smoke particles

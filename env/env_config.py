@@ -1,3 +1,5 @@
+import os
+
 # -------- combat_logic ----------
 ATTACK_RANGE    = 8
 TIGER_DAMAGE    = 40   # Tiger tank — historically superior firepower
@@ -72,12 +74,12 @@ FM_PROVIDER = "groq"
 
 # HuggingFace provider — get token at https://huggingface.co/settings/tokens
 FM_MODEL_ID = "Qwen/Qwen2.5-72B-Instruct"
-HF_TOKEN    = "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"
+HF_TOKEN    = os.environ.get("HF_TOKEN", "")
 
 # https://console.groq.com/keys
 # switch to "groq" above if HF rate-limits you
 GROQ_MODEL_ID = "llama-3.3-70b-versatile"
-GROQ_API_KEY  = "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"
+GROQ_API_KEY  = os.environ.get("GROQ_API_KEY", "")
 
 # default reward multipliers (Option A) - LLM overrides these every N episodes
 FM_DEFAULT_CAPTURE_MULT = 1.0

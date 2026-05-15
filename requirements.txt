@@ -1,4 +1,13 @@
+# Core simulation
 gymnasium>=0.29.0
 numpy>=1.24.0
 matplotlib>=3.7.0
 pygame>=2.5.0
+
+# Luftwaffe PSO target selection (Topic 4)
+pyswarm>=0.6.0
+
+# LLM Field Marshal — smolagents ToolCallingAgent (Topic 3)
+# Optional: if not installed, the rule-based fallback is used automatically
+smolagents>=1.0.0
+huggingface_hub>=0.20.0

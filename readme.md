@@ -2,6 +2,8 @@
 
 Artificial Intelligence course project. Multi-agent tactical simulation of the Battle of Normandy implemented using Gymnasium and tabular Q-Learning.
 
+Link: https://github.com/alejandror5803/IA-normandy-simulation-RL
+
 ---
 
 ## Table of Contents
@@ -25,7 +27,7 @@ Artificial Intelligence course project. Multi-agent tactical simulation of the B
 
 ## Description
 
-IA-Normandy is a tactical simulation of the Battle of Normandy (and later the Battle of Caen) in a 2D grid environment of 40×40 cells. The project models a historically accurate numerical imbalance: the blue team (Germans, Tigers) starts at a 1:3 disadvantage against the red team (Allies, Shermans), but compensates with greater armor and firepower per unit.
+IA-Normandy is a tactical simulation of the Battle of Normandy (and later the Battle of Caen) in a 2D grid environment of 100×100 cells. The project models a historically accurate numerical imbalance: the blue team (Germans, Tigers) starts at a 1:3 disadvantage against the red team (Allies, Shermans), but compensates with greater armor and firepower per unit.
 
 The objectives of the blue team are:
 - Capture and hold points of interest A, B, and C (with B being the most strategically valuable).
@@ -103,9 +105,9 @@ Before each mission, `pyswarm.pso()` is used to find the map coordinate `(x, y)`
 f(x, y) = Σ HP_enemy × (1 − cover × 0.5) × distance_factor × (tanks / 3)
 ```
 
-PSO parameters: 15 particles, 20 iterations, ω=0.5, φp=1.5, φg=1.5.
+PSO parameters: 50 particles, 40 iterations, ω=0.5, φp=1.5, φg=1.5.
 
-The blast has a Manhattan radius of 4 cells with a linear falloff. Terrain cover and tank count are taken into account. `pyswarm`'s internal output is suppressed with stdout redirection so it does not pollute the training log.
+The blast has a Manhattan radius of 5 cells with a linear falloff. Terrain cover and tank count are taken into account. `pyswarm`'s internal output is suppressed with stdout redirection so it does not pollute the training log.
 
 #### Rendering
 
@@ -115,13 +117,13 @@ The aircraft is rendered as an animated JU-87 sprite (`resources/ju87.png`) that
 - Draws a semi-transparent path line to its target.
 - Shows a red blast-radius crosshair on the target cell.
 
-A configurable delay (`START_DELAY = 40 steps`) prevents the aircraft from bombing the enemy spawn before platoons have dispersed.
+A configurable delay (`START_DELAY = 50 steps`) prevents the aircraft from bombing the enemy spawn before platoons have dispersed.
 
 ---
 
 ### Field Marshal — Strategic Advisor — `agents/field_marshal.py`
 
-Two independent Field Marshals — one per team — act as LLM-based strategic advisors using the **smolagents** `ToolCallingAgent` (Topic 3). They are called every `FM_STRATEGY_INTERVAL = 500` episodes to avoid burning API quota, keeping the last directive active between calls.
+Two independent Field Marshals — one per team — act as LLM-based strategic advisors using the **smolagents** `ToolCallingAgent` (Topic 3). They are called every `FM_STRATEGY_INTERVAL = 1000` episodes (after a warmup of 1500 episodes) to avoid burning API quota, keeping the last directive active between calls.
 
 If `smolagents` is not installed or the API call fails, both fall back silently to their rule-based equivalents.
 
@@ -257,7 +259,7 @@ IA-normandy-simulation-RL/
 
 ### Map and Terrain
 
-The environment is a 40×40 grid rendered with Pygame, using `mapaNormandia.png` as the background. The map and unit spawn positions are generated once and remain fixed across all episodes to allow Q-tables to converge to a stable policy.
+The environment is a 100×100 grid rendered with Pygame, using `mapaNormandia.png` as the background. The map and unit spawn positions are generated once and remain fixed across all episodes to allow Q-tables to converge to a stable policy.
 
 Sample of the map used:
 
@@ -284,9 +286,9 @@ Sample of the map used:
 
 | Team           | Platoons | Tanks/Platoon | HP/Platoon | Image                                    |
 |----------------|----------|---------------|------------|------------------------------------------|
-| Blue (Tigers)  | 4        | 6             | 600        | ![Tiger](resources/tiger.png)            |
-| Red (Shermans) | 12 (3:1) | 3             | 300        | ![Sherman](resources/sherman.png)        |
-| LF (Luftwaffe) | 2        | 1             | N/A        | ![Luftwaffe](resources/ju87.png)         |
+| Blue (Tigers)  | 4        | 6             | 650        | ![Tiger](resources/tiger.png)            |
+| Red (Shermans) | 12 (3:1) | 5             | 500        | ![Sherman](resources/sherman.png)        |
+| LF (Luftwaffe) | 1        | 1             | N/A        | ![Luftwaffe](resources/ju87.png)         |
 
 When HP drops below 100, a tank is destroyed and the platoon's firepower decreases proportionally.
 
@@ -310,7 +312,7 @@ Each platoon receives a vector of 16 integer values in the range [0–9]:
 | 2     | ammo_level   | 0–5   | Ammunition level (ammo // 20)                         |
 | 3     | num_tanks    | 0–5   | Remaining operational tanks                           |
 | 4     | cover_type   | 0–2   | Type of cover in the current cell                     |
-| 5     | enemy_nearby | 0–1   | Enemy within ≤ 4 cells                                |
+| 5     | enemy_nearby | 0–1   | Enemy within ≤ 12 cells (ENEMY_NEARBY_RANGE)          |
 | 6     | enemy_dist   | 0–9   | Distance to the nearest enemy                         |
 | 7     | captured_A   | 0–1   | Point A captured by blue                              |
 | 8     | captured_B   | 0–1   | Point B captured by blue                              |
@@ -355,9 +357,9 @@ Each platoon receives a vector of 16 integer values in the range [0–9]:
 Wrappers allow us to add functionality to the base environment without modifying its code. They are stacked in layers on top of the environment, so that each one transforms observations, actions, or metrics before they reach the agent or the training loop.
 
 We have used the following:
-- **FogOfWarWrapper:** Hides enemies beyond 8 cells. Simulates the historical fog of war.
+- **FogOfWarWrapper:** Hides enemies beyond 12 cells (ENEMY_NEARBY_RANGE). Simulates the historical fog of war.
 - **ActionMaskWrapper:** Prevents invalid actions (attacking without ammo, resupplying outside supply points). Automatically redirects to META_CAPTURE.
-- **TimeLimit:** Limits each episode to a maximum number of steps (default: 500).
+- **TimeLimit:** Limits each episode to a maximum number of steps (default: 800).
 - **EpisodeStatsWrapper:** Sliding window over the last 100 episodes — average reward, average steps, and average captures.
 - **ObsNormWrapper:** Normalizes the observation vector to [0, 1]. Available but not currently applied in `make_env` (reserved for future neural network policies).
 
@@ -379,6 +381,17 @@ We have used the following:
 **Optional (for LLM Field Marshal):** `smolagents`, `huggingface_hub`
 
 If `smolagents` is not installed the simulation runs normally using the rule-based Field Marshal fallback — no API key required.
+
+**API keys (optional):** Set the following environment variables before running to enable the LLM Field Marshal:
+```bash
+# Windows PowerShell
+$env:GROQ_API_KEY = "your_groq_key_here"
+$env:HF_TOKEN     = "your_hf_token_here"
+
+# Linux / macOS
+export GROQ_API_KEY="your_groq_key_here"
+export HF_TOKEN="your_hf_token_here"
+```
 
 ---
 
@@ -450,7 +463,7 @@ The plots are automatically generated at the end of training using `metrics_and_
 ## Future Work (ideas)
 
 - **Supply truck:** Implement a supply truck controlled directly by the Field Marshal (LLM), autonomously managing dynamic resupply of platoons based on the current state of the battlefield.
-- **Map expansion:** Scale the grid from 40×40 to a larger size to accommodate new air and ground units, with procedural generation adapted to the new dimensions.
+- **Map expansion:** Further scale the grid beyond 100×100 to accommodate new air and ground units, with procedural generation adapted to the new dimensions.
 - **Render improvements:** Enhance the Pygame interface with HP indicators over sprites, a real-time statistics panel, persistent smoke effects and per-agent status visualization.
 - **Neural network policy:** Replace tabular Q-Learning with a DQN or PPO policy for the commander agents, using the existing `ObsNormWrapper` for input normalisation.
 

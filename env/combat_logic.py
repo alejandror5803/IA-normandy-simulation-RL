@@ -108,8 +108,8 @@ def get_best_cover_cell(peloton, grid, map_size):
 
 # It makes a resupply of ammo or fuel to a peloton
 def do_resupply(peloton, point_data):
-    fuel_needed = 100 - peloton['fuel']
-    ammo_needed = 100 - peloton['ammo']
+    fuel_needed = max(0, efg.PELOTON_FUEL - peloton['fuel'])
+    ammo_needed = max(0, efg.PELOTON_AMMO - peloton['ammo'])
 
     fuel_given = min(fuel_needed, point_data['gas'])
     ammo_given = min(ammo_needed, point_data['ammo'])

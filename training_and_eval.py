@@ -1,8 +1,79 @@
+import os
+import numpy as np
+
 from env.normandy_env import make_env
 from agents.command_agent import command_agent
 from agents.field_marshal import SmolAgentsFieldMarshal, AlliedFieldMarshal
 from utils.metrics_and_plotter import EpisodeTracker, plot_all
 import env.env_config as cfg
+
+QTABLE_PATH = os.path.join(cfg.PLOTS_SAVE_PATH, "qtables.npz")
+
+
+def save_qtables(commanders, env_raw, path=QTABLE_PATH):
+    """Save all Q-tables (blue + red, all agent types) to a single .npz file."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    data = {}
+    for i, agent in enumerate(commanders):
+        data[f'blue_cmd_{i}'] = agent.q_table
+        data[f'blue_cmd_eps_{i}'] = np.array([agent.epsilon])
+    for i, agent in enumerate(env_raw.attack_agents):
+        data[f'blue_atk_{i}'] = agent.q_table
+    for i, agent in enumerate(env_raw.defense_agents):
+        data[f'blue_def_{i}'] = agent.q_table
+    for i, agent in enumerate(env_raw.capture_agents):
+        data[f'blue_cap_{i}'] = agent.q_table
+    for i, agent in enumerate(env_raw.red_command_agents):
+        data[f'red_cmd_{i}'] = agent.q_table
+        data[f'red_cmd_eps_{i}'] = np.array([agent.epsilon])
+    for i, agent in enumerate(env_raw.red_attack_agents):
+        data[f'red_atk_{i}'] = agent.q_table
+    for i, agent in enumerate(env_raw.red_defense_agents):
+        data[f'red_def_{i}'] = agent.q_table
+    for i, agent in enumerate(env_raw.red_capture_agents):
+        data[f'red_cap_{i}'] = agent.q_table
+    np.savez(path, **data)
+    print(f"[Q-tables] Saved to {path}")
+
+
+def load_qtables(commanders, env_raw, path=QTABLE_PATH):
+    """Load Q-tables from a .npz file and restore epsilons. Returns True on success."""
+    if not os.path.exists(path):
+        print(f"[Q-tables] No checkpoint found at {path} — starting from scratch.")
+        return False
+    data = np.load(path)
+    for i, agent in enumerate(commanders):
+        key = f'blue_cmd_{i}'
+        if key in data:
+            agent.q_table[:] = data[key]
+        eps_key = f'blue_cmd_eps_{i}'
+        if eps_key in data:
+            agent.epsilon = float(data[eps_key][0])
+    for i, agent in enumerate(env_raw.attack_agents):
+        key = f'blue_atk_{i}'
+        if key in data: agent.q_table[:] = data[key]
+    for i, agent in enumerate(env_raw.defense_agents):
+        key = f'blue_def_{i}'
+        if key in data: agent.q_table[:] = data[key]
+    for i, agent in enumerate(env_raw.capture_agents):
+        key = f'blue_cap_{i}'
+        if key in data: agent.q_table[:] = data[key]
+    for i, agent in enumerate(env_raw.red_command_agents):
+        key = f'red_cmd_{i}'
+        if key in data: agent.q_table[:] = data[key]
+        eps_key = f'red_cmd_eps_{i}'
+        if eps_key in data: agent.epsilon = float(data[eps_key][0])
+    for i, agent in enumerate(env_raw.red_attack_agents):
+        key = f'red_atk_{i}'
+        if key in data: agent.q_table[:] = data[key]
+    for i, agent in enumerate(env_raw.red_defense_agents):
+        key = f'red_def_{i}'
+        if key in data: agent.q_table[:] = data[key]
+    for i, agent in enumerate(env_raw.red_capture_agents):
+        key = f'red_cap_{i}'
+        if key in data: agent.q_table[:] = data[key]
+    print(f"[Q-tables] Loaded from {path}")
+    return True
 
 # meta-action index to FM multiplier key (blue only)
 _MULT_KEY = {
@@ -60,7 +131,17 @@ def _build_red_fm_stats(tracker, base_env) -> dict:
     }
 
 
-def train(episodes=5000, render_every=1000):
+def train(episodes=5000, render_every=1000, resume=True, save_every=500):
+    """
+    Main training loop.
+
+    Parameters:
+    episodes:     total episodes to run.
+    render_every: render every N episodes (0 = every step).
+    resume:       if True, load Q-tables from the last checkpoint before training.
+                  if False, always start from scratch (ignores existing checkpoint).
+    save_every:   save Q-tables every N episodes (also saved at the very end).
+    """
     env = make_env(render_mode="human", render_every=render_every)
 
     tracker = EpisodeTracker()
@@ -80,6 +161,10 @@ def train(episodes=5000, render_every=1000):
     red_strategy   = red_fm.current_strategy
 
     fm_next_call   = max(cfg.FM_STRATEGY_INTERVAL, cfg.FM_WARMUP_EPISODES)
+
+    # load checkpoint if requested (must happen after env is built so red agents exist)
+    if resume:
+        load_qtables(commanders, env.unwrapped)
 
     for ep in range(episodes):
         obs, _ = env.reset()
@@ -153,6 +238,10 @@ def train(episodes=5000, render_every=1000):
 
             fm_next_call += cfg.FM_STRATEGY_INTERVAL
 
+        # periodic checkpoint
+        if save_every > 0 and (ep + 1) % save_every == 0:
+            save_qtables(commanders, env.unwrapped)
+
         if (ep + 1) % 50 == 0:
             avg_window = sum(tracker.total_rewards[-cfg.MOVING_AVG_WINDOW:]) / len(
                 tracker.total_rewards[-cfg.MOVING_AVG_WINDOW:]
@@ -181,9 +270,12 @@ def train(episodes=5000, render_every=1000):
             )
 
     base_env = env.unwrapped
+    save_qtables(commanders, base_env)   # always save at the end of training
     env.close()
     plot_all(tracker, commanders, base_env)
 
 
 if __name__ == "__main__":
-    train(episodes=10000, render_every=500)
+    # resume=True  → continue from last checkpoint (default)
+    # resume=False → start from scratch, ignore existing qtables.npz
+    train(episodes=10000, render_every=500, resume=True, save_every=500)

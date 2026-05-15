@@ -96,19 +96,21 @@ def plot_training_curves(tracker, save_path=PLOTS_SAVE_PATH, window=MOVING_AVG_W
     axes[1].legend()
     axes[1].grid(True, alpha=0.3)
 
-    # --- 3. TD error (training error) ---
-    avg_td = _moving_avg(tracker.cmd_td_errors, window)
-    avg_td_long = _moving_avg(tracker.cmd_td_errors, long_window)
-    axes[2].plot(episodes, tracker.cmd_td_errors, alpha=0.2, color='crimson')
+    # --- 3. TD error (training error) — log scale to reveal early-training dynamics ---
+    td_safe     = [max(v, 1e-6) for v in tracker.cmd_td_errors]
+    avg_td      = _moving_avg(td_safe, window)
+    avg_td_long = _moving_avg(td_safe, long_window)
+    axes[2].plot(episodes, td_safe, alpha=0.2, color='crimson')
     axes[2].plot(episodes, avg_td, color='crimson', linewidth=2,
                  label=f'moving avg ({window} ep)')
     axes[2].plot(episodes, avg_td_long, color='darkred', linewidth=2,
                  linestyle='--', label=f'moving avg ({long_window} ep)')
-    axes[2].set_title('Command agent — TD error')
+    axes[2].set_yscale('log')
+    axes[2].set_title('Command agent — TD error (log scale)')
     axes[2].set_xlabel('Episode')
     axes[2].set_ylabel('Mean |TD error|')
     axes[2].legend()
-    axes[2].grid(True, alpha=0.3)
+    axes[2].grid(True, alpha=0.3, which='both')
 
     plt.tight_layout()
     if save_path:
@@ -164,7 +166,7 @@ def _command_agent_heatmaps(commander, axes_policy, axes_values):
         ax_p = axes_policy[ammo_idx]
         ax_v = axes_values[ammo_idx]
 
-        cmap_p = plt.cm.get_cmap('tab10', 4)
+        cmap_p = plt.colormaps.get_cmap('tab10').resampled(4)
         ax_p.imshow(policy_grid, cmap=cmap_p, vmin=0, vmax=3, aspect='auto')
         ax_p.set_xticks(range(3))
         ax_p.set_xticklabels(hp_labels, fontsize=8)
@@ -204,7 +206,7 @@ def _capture_agent_heatmaps(cap_agent, axes_policy, axes_values):
     dy_labels    = ['Same row', 'Obj below', 'Obj above']
     dist_labels  = ['Close\n(<3 tiles)', 'Medium\n(3-7 tiles)', 'Far\n(>7 tiles)']
 
-    cmap_p = plt.cm.get_cmap('tab10', 5)
+    cmap_p = plt.colormaps.get_cmap('tab10').resampled(5)
 
     for dist_idx in range(3):
         policy_grid = np.zeros((3, 3), dtype=int)
@@ -365,6 +367,81 @@ def plot_agent_policies(commanders, env_raw, save_path=PLOTS_SAVE_PATH):
     plt.close(fig)
 
 
+# ============================================================
+# 3.  WIN RATE + CAPTURES  (per team over time)
+# ============================================================
+
+def plot_win_rate_and_captures(tracker, save_path=PLOTS_SAVE_PATH, window=MOVING_AVG_WINDOW):
+    if save_path and not os.path.exists(save_path):
+        os.makedirs(save_path)
+
+    n = len(tracker.total_rewards)
+    if n == 0:
+        return
+    episodes = list(range(1, n + 1))
+
+    # --- convert winner labels to per-episode binary win flags ---
+    blue_wins = [1.0 if w == 'blue' else 0.0 for w in tracker.winner_end]
+    red_wins  = [1.0 if w == 'red'  else 0.0 for w in tracker.winner_end]
+
+    blue_wr = _moving_avg(blue_wins, window)
+    red_wr  = _moving_avg(red_wins,  window)
+
+    long_window = min(MOVING_AVG_WINDOW_LONG, n)
+    blue_wr_long = _moving_avg(blue_wins, long_window)
+    red_wr_long  = _moving_avg(red_wins,  long_window)
+
+    blue_caps = tracker.blue_captures_end
+    red_caps  = tracker.red_captures_end
+    avg_blue_caps = _moving_avg(blue_caps, window)
+    avg_red_caps  = _moving_avg(red_caps,  window)
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    fig.suptitle('Win rate and captures per episode', fontsize=13)
+
+    # --- subplot 1: rolling win rate per team ---
+    ax = axes[0]
+    ax.plot(episodes, blue_wr, color='steelblue', linewidth=2,
+            label=f'Blue win rate (avg {window} ep)')
+    ax.plot(episodes, blue_wr_long, color='navy', linewidth=2, linestyle='--',
+            label=f'Blue win rate (avg {long_window} ep)')
+    ax.plot(episodes, red_wr, color='tomato', linewidth=2,
+            label=f'Red win rate (avg {window} ep)')
+    ax.plot(episodes, red_wr_long, color='darkred', linewidth=2, linestyle='--',
+            label=f'Red win rate (avg {long_window} ep)')
+    ax.axhline(0.5, color='gray', linewidth=1, linestyle=':', alpha=0.6)
+    ax.set_ylim(-0.05, 1.05)
+    ax.set_title('Win rate per team')
+    ax.set_xlabel('Episode')
+    ax.set_ylabel('Win rate (rolling avg)')
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+
+    # --- subplot 2: average captures per episode ---
+    ax2 = axes[1]
+    ax2.plot(episodes, blue_caps, alpha=0.15, color='steelblue')
+    ax2.plot(episodes, avg_blue_caps, color='steelblue', linewidth=2,
+             label=f'Blue captures (avg {window} ep)')
+    ax2.plot(episodes, red_caps, alpha=0.15, color='tomato')
+    ax2.plot(episodes, avg_red_caps, color='tomato', linewidth=2,
+             label=f'Red captures (avg {window} ep)')
+    ax2.axhline(3, color='gray', linewidth=1, linestyle=':', alpha=0.6,
+                label='Max (3 objectives)')
+    ax2.set_ylim(-0.2, 3.5)
+    ax2.set_title('Objectives captured at episode end')
+    ax2.set_xlabel('Episode')
+    ax2.set_ylabel('Objectives held (0–3)')
+    ax2.legend(fontsize=8)
+    ax2.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    if save_path:
+        fig.savefig(os.path.join(save_path, 'win_rate_and_captures.png'), dpi=120)
+    plt.show()
+    plt.close(fig)
+
+
 def plot_all(tracker, commanders, env_raw, save_path=PLOTS_SAVE_PATH, window=MOVING_AVG_WINDOW):
     plot_training_curves(tracker, save_path=save_path, window=window)
+    plot_win_rate_and_captures(tracker, save_path=save_path, window=window)
     plot_agent_policies(commanders, env_raw, save_path=save_path)
