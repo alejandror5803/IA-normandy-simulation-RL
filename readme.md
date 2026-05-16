@@ -236,7 +236,7 @@ IA-normandy-simulation-RL/
 │   ├── mapaNormandia.png
 │   └── Estructura de la practica(inicial).png
 │
-├── readme_resources/               # Static images used inside README
+├── readme_resources/               # Static images used inside README (first task)
 │   ├── terminal.png
 │   ├── render_ex.png
 │   ├── training_curves.png
@@ -244,6 +244,17 @@ IA-normandy-simulation-RL/
 │   ├── command_agent_policy.png
 │   ├── attack_defense_policy.png
 │   └── capture_agent_policy.png
+|
+|
+├── readme_resources2/               # Static images used inside README (final task)
+│   ├── terminal_output.png
+│   ├── render.png
+│   ├── training_performance.png
+│   ├── epsilon_decay.png
+│   ├── command_agent.png
+│   ├── attack_defense_agent.png
+│   └── capture_agent.png
+|  
 │
 └── results/                        # Generated at the end of training runs
     ├── training_curves.png
@@ -409,17 +420,23 @@ When a platoon is hit, an animated explosion visual effect is displayed over its
 
 **Terminal output during training:**
 
-![Terminal output](readme_resources/terminal.png)
+![Terminal output](readme_resources2/terminal_output.png)
+
 
 **Render image:**
 
-![Render example](readme_resources/render_ex.png)
+![Render example](readme_resources2/render.png)
+
+**LLM interaction**
+
+![LLM interaction](readme_resources2/LLM_interaction.png)
+
 
 **Training Performance:**
 
 Displays the total reward per episode (light blue) along with its 50-episode moving average (dark blue), the episode length in steps, and the commander agent's TD error. It can be observed that episodes shorten rapidly during the first 250 episodes, indicating that the agents learn to end the game efficiently.
 
-![Training performance](readme_resources/training_curves.png)
+![Training performance](readme_resources2/training_performance.png)
 
 **How we interpret convergence in this project (important):**
 
@@ -434,27 +451,33 @@ In our setup, some oscillation is normal because both teams keep learning and th
 
 Evolution of epsilon for each type of agent throughout training. In this project, epsilon is not only decayed; it is also adjusted by the Field Marshal at each strategy update. So a saw-tooth pattern is normal: decay phase -> FM adjustment -> decay phase.
 
-![Epsilon decay](readme_resources/epsilon_decay.png)
+![Epsilon decay](readme_resources2/epsilon_decay.png)
+
+**Win rate and captures per episode:**
+
+Training results showing the evolution of team win rates and objective captures across 10,000 reinforcement learning episodes. The graphs highlight how agents progressively improve battlefield performance, strategy adaptation, and mission control over time.
+
+![Win rate and captures](readme_resources2/win_and_captures.png)
 
 **Attack and Defense Agents – Q-values and Policy:**
 
 The attack agent correctly learns to fire when enemies are within range.
 The defense agent learns to seek cover when enemies are nearby and to remain stationary when already in high cover (Wall).
 
-![Attack and defense agents](readme_resources/attack_defense_policy.png)
+![Attack and defense agents](readme_resources2/attack_defense_agent.png)
 
 **Capture Agent – Policy and State Values:**
 
 At short distances, state values are positive, while at longer distances negative values increase, reflecting the penalty for moving away from the objective.
 
-![Capture agent policy](readme_resources/capture_agent_policy.png)
+![Capture agent policy](readme_resources2/capture_agent.png)
 
 **Commander Agent – Policy and State Values:**
 
 With normal ammunition and enemies within range, the agent learns to attack when HP is high and to resupply when it is low.
 With low ammunition, it always prioritizes capturing regardless of the threat.
 
-![Command agent policy](readme_resources/command_agent_policy.png)
+![Command agent policy](readme_resources2/command_agent.png)
 
 The plots are automatically generated at the end of training using `metrics_and_plotter.py`, which logs per episode the total reward, duration, TD error, captures, and the epsilon of each type of agent, and saves them in the folder configured in `env_config.py` (`PLOTS_SAVE_PATH`).
 
