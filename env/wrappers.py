@@ -177,8 +177,6 @@ class ActionMaskWrapper(gym.Wrapper):
 
     # monitorates and gives statistics of the wrapper
     def step(self, actions):
-        original_actions = list(actions)
-
         if self.redirect_invalid:
             masks = self._compute_masks()
             corrected_actions = list(actions)
@@ -188,7 +186,5 @@ class ActionMaskWrapper(gym.Wrapper):
             actions = corrected_actions
 
         obs, rewards, terminated, truncated, info = self.env.step(actions)
-        info['action_masks']     = self._compute_masks()
-        info['executed_actions'] = list(actions)
-        info['original_actions'] = original_actions
+        info['action_masks'] = self._compute_masks()
         return obs, rewards, terminated, truncated, info

@@ -166,8 +166,6 @@ def train(episodes=5000, render_every=1000, resume=True, save_every=500):
     if resume:
         load_qtables(commanders, env.unwrapped)
 
-    base_env_ref = env.unwrapped   # cached so we can read peloton state cheaply
-
     for ep in range(episodes):
         obs, _ = env.reset()
         total_reward = 0
@@ -176,32 +174,24 @@ def train(episodes=5000, render_every=1000, resume=True, save_every=500):
         env.unwrapped.increase_episode()
 
         while not done:
-            alive_before = [pel['num_tanks'] > 0 for pel in base_env_ref.blue_pelotons]
-
             actions = [commanders[i].choose_action(obs[i]) for i in range(4)]
 
             obs_new, rewards, terminated, truncated, info = env.step(actions)
 
-            executed_actions = info.get('executed_actions', actions)
-
             for i in range(4):
-                if not alive_before[i]:
-                    continue
-
-                # Option A (blue): pick the FM reward multiplier for the action
-                # actually executed (not the originally chosen one)
-                mult_key = _MULT_KEY.get(executed_actions[i])
+                # Option A (blue): pick the FM reward multiplier for the action taken
+                mult_key = _MULT_KEY.get(actions[i])
                 mult     = blue_strategy.get(mult_key, 1.0) if mult_key else 1.0
 
                 # strip P_STEP before scaling - we don't want the step penalty amplified
                 base_r = rewards[i] - cfg.P_STEP
                 r = commanders[i].compute_reward(
-                    obs[i], obs_new[i], executed_actions[i], base_r,
+                    obs[i], obs_new[i], actions[i], base_r,
                     reward_mult=mult,
                 )
                 r += cfg.P_STEP
 
-                td_err = commanders[i].update(obs[i], executed_actions[i], r, obs_new[i])
+                td_err = commanders[i].update(obs[i], actions[i], r, obs_new[i])
                 ep_td_errors.append(td_err)
 
             obs           = obs_new
