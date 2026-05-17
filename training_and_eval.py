@@ -278,4 +278,4 @@ def train(episodes=5000, render_every=1000, resume=True, save_every=500):
 if __name__ == "__main__":
     # resume=True  | continue from last checkpoint (default)                |
     # resume=False | start from scratch, ignore existing qtables.npz        |
-    train(episodes=10000, render_every=5000, resume=True, save_every=1000)
+    train(episodes=10000, render_every=1000, resume=True, save_every=1000)

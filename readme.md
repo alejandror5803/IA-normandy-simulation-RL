@@ -129,7 +129,7 @@ A configurable delay (`START_DELAY = 50 steps`) prevents the aircraft from bombi
 
 ---
 
-### Field Marshal — Strategic Advisor — `agents/field_marshal.py`
+### Field Marshal — Strategic Advisor with Smolagents — `agents/field_marshal.py`
 
 Two independent Field Marshals — one per team — act as LLM-based strategic advisors using the **smolagents** `ToolCallingAgent`. They are called every `FM_STRATEGY_INTERVAL = 1000` episodes (after a warmup of 1500 episodes) to avoid burning API quota, keeping the last directive active between calls.
 
