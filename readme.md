@@ -1,8 +1,8 @@
-# IA-Normandy – Normandy Battle Simulation with RL
+﻿# IA-Normandy – Normandy Battle Simulation with RL
 
 Artificial Intelligence course project. Multi-agent tactical simulation of the Battle of Normandy implemented using Gymnasium and tabular Q-Learning.
 
-Link: https://github.com/alejandror5803/IA-normandy-simulation-RL
+Link: [https://github.com/alejandror5803/IA-normandy-simulation-RL](https://github.com/alejandror5803/IA-normandy-simulation-RL)
 
 ---
 
@@ -30,6 +30,7 @@ Link: https://github.com/alejandror5803/IA-normandy-simulation-RL
 IA-Normandy is a tactical simulation of the Battle of Normandy (and later the Battle of Caen) in a 2D grid environment of 100×100 cells. The project models a historically accurate numerical imbalance: the blue team (Germans, Tigers) starts at a 1:3 disadvantage against the red team (Allies, Shermans), but compensates with greater armor and firepower per unit.
 
 The objectives of the blue team are:
+
 - Capture and hold points of interest A, B, and C (with B being the most strategically valuable).
 - Engage the enemy while taking advantage of terrain cover.
 
@@ -43,6 +44,7 @@ This is a multi-agent self-play setup with ~64 learning components (commanders +
 
 Because of that, we should not expect a perfect smooth single-agent convergence curve.  
 In this project, we use **practical convergence**:
+
 - moving averages stabilize in a range (not necessarily at one flat value),
 - episode length reaches a stable band,
 - learned policies become consistent in the policy plots.
@@ -56,6 +58,7 @@ So, oscillation by itself is not a bug in this architecture. The real check is w
 ## Multi-Agent Architecture
 
 The system is organized into two hierarchical levels:
+
 - **Commander Agent:** Coordinates the platoon's sub-agents. Selects which sub-agent takes control each step.
 - **Attack Agent:** Decides whether to attack the nearest enemy within its observation range. It is penalized if an enemy is present and it does not fire; it is rewarded for each successful hit.
 - **Capture Agent:** Moves the platoon toward the designated objective. It is rewarded for getting closer and penalized for moving away.
@@ -75,25 +78,29 @@ The Luftwaffe adds a German JU-87 Stuka that performs bombing runs on Allied pla
 
 The aircraft's lifecycle is modelled as a discrete Markov Chain with 6 states:
 
-| State | Code | Description |
-|-------|------|-------------|
-| AVAILABLE | AV | Waiting at base, ready for a mission |
-| INBOUND | IB | Flying toward the target |
-| STRIKING | ST | Executing the bomb run (1 step) |
-| RETURNING | RT | Flying back to base |
-| REARMING | RA | Reloading at base |
-| SHOT_DOWN | SD | Absorbing state — aircraft destroyed |
+
+| State     | Code | Description                          |
+| --------- | ---- | ------------------------------------ |
+| AVAILABLE | AV   | Waiting at base, ready for a mission |
+| INBOUND   | IB   | Flying toward the target             |
+| STRIKING  | ST   | Executing the bomb run (1 step)      |
+| RETURNING | RT   | Flying back to base                  |
+| REARMING  | RA   | Reloading at base                    |
+| SHOT_DOWN | SD   | Absorbing state — aircraft destroyed |
+
 
 The transition matrix `T` captures the probabilities between states. The stochastic element is `P_FLAK = 0.04`: a 4% chance per step of being intercepted by anti-aircraft fire while in the `INBOUND` state.
 
 Theoretical statistics computed at initialisation from the chain:
 
-| Metric | Value |
-|--------|-------|
-| Cycle length | 20 steps |
-| P(survive one mission) | 81.5% |
-| Availability | ~5% |
-| Expected missions before shootdown | ~5.4 |
+
+| Metric                             | Value    |
+| ---------------------------------- | -------- |
+| Cycle length                       | 20 steps |
+| P(survive one mission)             | 81.5%    |
+| Availability                       | ~5%      |
+| Expected missions before shootdown | ~5.4     |
+
 
 #### 2. Particle Swarm Optimization (Topic 4) — Target selection
 
@@ -112,6 +119,7 @@ The blast has a Manhattan radius of 5 cells with a linear falloff. Terrain cover
 #### Rendering
 
 The aircraft is rendered as an animated JU-87 sprite (`resources/ju87.png`) that:
+
 - Interpolates its position between base and target based on the current Markov Chain state and steps elapsed.
 - Rotates to face the flight direction.
 - Draws a semi-transparent path line to its target.
@@ -133,13 +141,16 @@ If `smolagents` is not installed or the API call fails, both fall back silently 
 
 **Tools provided to the LLM:**
 
-| Tool | Arguments | Purpose |
-|------|-----------|---------|
-| `get_battle_performance` | avg_reward, win_rate, avg_captures, blue_alive_avg | Recent performance report |
-| `get_commander_stats` | blue_epsilons_csv, blue_q_means_csv, red_epsilon | Per-commander Q-table and epsilon status |
-| `get_luftwaffe_report` | missions_done, lw_active | Luftwaffe mission count and aircraft status |
+
+| Tool                     | Arguments                                          | Purpose                                     |
+| ------------------------ | -------------------------------------------------- | ------------------------------------------- |
+| `get_battle_performance` | avg_reward, win_rate, avg_captures, blue_alive_avg | Recent performance report                   |
+| `get_commander_stats`    | blue_epsilons_csv, blue_q_means_csv, red_epsilon   | Per-commander Q-table and epsilon status    |
+| `get_luftwaffe_report`   | missions_done, lw_active                           | Luftwaffe mission count and aircraft status |
+
 
 **LLM output format (one line):**
+
 ```
 CAPTURE_MULT=1.5  KILL_MULT=0.8  DEFEND_MULT=1.0
 BLUE_EPS=0.15,0.20,0.15,0.25  RED_EPS=0.35
@@ -160,9 +171,11 @@ A multiplier of `2.0` on captures doubles the gradient signal for capture action
 **Option B — Per-commander epsilon:**
 After each FM call, each blue commander's epsilon is set individually based on the LLM's assessment of its Q-table status (confident / learning / confused).
 
+
 | Multiplier range | Epsilon range |
-|-----------------|---------------|
-| [0.5, 2.5] | [0.05, 0.70] |
+| ---------------- | ------------- |
+| [0.5, 2.5]       | [0.05, 0.70]  |
+
 
 ---
 
@@ -172,14 +185,17 @@ After each FM call, each blue commander's epsilon is set individually based on t
 
 **Tools provided to the LLM:**
 
-| Tool | Arguments | Purpose |
-|------|-----------|---------|
-| `get_allied_battle_performance` | red_win_rate, avg_red_alive, avg_blue_alive | Red team performance report |
-| `get_squad_stats` | squad_epsilons_csv, squad_q_means_csv | Per-squad exploration and Q-value status |
+
+| Tool                            | Arguments                                   | Purpose                                  |
+| ------------------------------- | ------------------------------------------- | ---------------------------------------- |
+| `get_allied_battle_performance` | red_win_rate, avg_red_alive, avg_blue_alive | Red team performance report              |
+| `get_squad_stats`               | squad_epsilons_csv, squad_q_means_csv       | Per-squad exploration and Q-value status |
+
 
 The 12 red commanders are grouped into **4 squads of 3** (squad 0 = cmds 0–2, squad 1 = cmds 3–5, etc.) to match the 4-unit structure of the blue team.
 
 **LLM output format:**
+
 ```
 RED_EPS=0.15,0.20,0.15,0.25  RATIONALE=Squad 2 is getting wiped out — push exploration.
 ```
@@ -188,6 +204,7 @@ RED_EPS=0.15,0.20,0.15,0.25  RATIONALE=Squad 2 is getting wiped out — push exp
 Red agents receive individual epsilon control per squad. Reward multipliers are not applied to red — giving red the same multipliers as blue when blue needs to capture would make red also learn to capture harder, which is counterproductive for the intended training dynamics.
 
 #### API call budget
+
 
 | Training length | Calls (German FM) | Calls (Allied FM) | Total |
 |-----------------|-------------------|-------------------|-------|
@@ -236,32 +253,25 @@ IA-normandy-simulation-RL/
 │   ├── mapaNormandia.png
 │   └── Estructura de la practica(inicial).png
 │
-├── readme_resources/               # Static images used inside README (first task)
-│   ├── terminal.png
-│   ├── render_ex.png
+├── readme_resources/               # Static images used inside README
+│   ├── terminal_output.png
+│   ├── render.png
+│   ├── LLM_interaction.png
 │   ├── training_curves.png
 │   ├── epsilon_decay.png
+│   ├── win_rate_and_captures.png
 │   ├── command_agent_policy.png
 │   ├── attack_defense_policy.png
 │   └── capture_agent_policy.png
-|
-|
-├── readme_resources2/               # Static images used inside README (final task)
-│   ├── terminal_output.png
-│   ├── render.png
-│   ├── training_performance.png
-│   ├── epsilon_decay.png
-│   ├── command_agent.png
-│   ├── attack_defense_agent.png
-│   └── capture_agent.png
-|  
 │
-└── results/                        # Generated at the end of training runs
+└── results/                        # Generated at the end of training runs (gitignored)
     ├── training_curves.png
     ├── epsilon_decay.png
+    ├── win_rate_and_captures.png
     ├── command_agent_policy.png
     ├── attack_defense_policy.png
-    └── capture_agent_policy.png
+    ├── capture_agent_policy.png
+    └── qtables.npz
 ```
 
 ---
@@ -368,6 +378,7 @@ Each platoon receives a vector of 16 integer values in the range [0–9]:
 Wrappers allow us to add functionality to the base environment without modifying its code. They are stacked in layers on top of the environment, so that each one transforms observations, actions, or metrics before they reach the agent or the training loop.
 
 We have used the following:
+
 - **FogOfWarWrapper:** Hides enemies beyond 12 cells (ENEMY_NEARBY_RANGE). Simulates the historical fog of war.
 - **ActionMaskWrapper:** Prevents invalid actions (attacking without ammo, resupplying outside supply points). Automatically redirects to META_CAPTURE.
 - **TimeLimit:** Limits each episode to a maximum number of steps (default: 800).
@@ -379,10 +390,12 @@ We have used the following:
 ## Installation
 
 **Requirements:**
+
 - Python 3.10 or higher
 - pip
 
 **Steps:**
+
 1. Clone repository
 2. (Recommended) Create a virtual environment
 3. Install dependencies
@@ -394,6 +407,7 @@ We have used the following:
 If `smolagents` is not installed the simulation runs normally using the rule-based Field Marshal fallback — no API key required.
 
 **API keys (optional):** Set the following environment variables before running to enable the LLM Field Marshal:
+
 ```bash
 # Windows PowerShell
 $env:GROQ_API_KEY = "your_groq_key_here"
@@ -420,23 +434,23 @@ When a platoon is hit, an animated explosion visual effect is displayed over its
 
 **Terminal output during training:**
 
-![Terminal output](readme_resources2/terminal_output.png)
-
+![Terminal output](readme_resources/terminal_output.png)
 
 **Render image:**
 
-![Render example](readme_resources2/render.png)
+![Render example](readme_resources/render.png)
 
-**LLM interaction**
+**LLM interaction:**
 
-![LLM interaction](readme_resources2/LLM_interaction.png)
+![LLM interaction](readme_resources/LLM_interaction.png)
 
+---
 
 **Training Performance:**
 
-Displays the total reward per episode (light blue) along with its 50-episode moving average (dark blue), the episode length in steps, and the commander agent's TD error. It can be observed that episodes shorten rapidly during the first 250 episodes, indicating that the agents learn to end the game efficiently.
+The reward starts negative during early exploration, rises to a peak of around 8,500–9,000 by episode 4,000–5,000, and then gradually falls to around 6,000–7,000 in the second half of training. This arc shape is not a failure; it reflects the coevolutionary arms race: blue learned a dominant strategy, the Field Marshal pushed red to explore harder, and red found a counter. Episode duration decreases consistently from ~300 to ~200 steps, meaning both teams resolve encounters faster as they learn. The TD error shows clear stepped jumps at episodes ~2,500 and ~5,500, which coincide exactly with Field Marshal interventions that raised red's epsilon and forced the Q-tables to re-evaluate previously stable states.
 
-![Training performance](readme_resources2/training_performance.png)
+![Training performance](readme_resources/training_curves.png)
 
 **How we interpret convergence in this project (important):**
 
@@ -445,57 +459,63 @@ We check practical convergence, not perfect flat curves:
 - stable episode length band,
 - policy maps that stop changing drastically.
 
-In our setup, some oscillation is normal because both teams keep learning and the Field Marshal periodically adjusts exploration and priorities.
-
-**Epsilon Decay – Exploration vs Exploitation:**
-
-Evolution of epsilon for each type of agent throughout training. In this project, epsilon is not only decayed; it is also adjusted by the Field Marshal at each strategy update. So a saw-tooth pattern is normal: decay phase -> FM adjustment -> decay phase.
-
-![Epsilon decay](readme_resources2/epsilon_decay.png)
-
-**Win rate and captures per episode:**
-
-Training results showing the evolution of team win rates and objective captures across 10,000 reinforcement learning episodes. The graphs highlight how agents progressively improve battlefield performance, strategy adaptation, and mission control over time.
-
-![Win rate and captures](readme_resources2/win_and_captures.png)
-
-**Attack and Defense Agents – Q-values and Policy:**
-
-The attack agent correctly learns to fire when enemies are within range.
-The defense agent learns to seek cover when enemies are nearby and to remain stationary when already in high cover (Wall).
-
-![Attack and defense agents](readme_resources2/attack_defense_agent.png)
-
-**Capture Agent – Policy and State Values:**
-
-At short distances, state values are positive, while at longer distances negative values increase, reflecting the penalty for moving away from the objective.
-
-![Capture agent policy](readme_resources2/capture_agent.png)
-
-**Commander Agent – Policy and State Values:**
-
-With normal ammunition and enemies within range, the agent learns to attack when HP is high and to resupply when it is low.
-With low ammunition, it always prioritizes capturing regardless of the threat.
-
-![Command agent policy](readme_resources2/command_agent.png)
-
-The plots are automatically generated at the end of training using `metrics_and_plotter.py`, which logs per episode the total reward, duration, TD error, captures, and the epsilon of each type of agent, and saves them in the folder configured in `env_config.py` (`PLOTS_SAVE_PATH`).
+In our setup, some oscillation is expected because both teams keep learning simultaneously and the Field Marshal periodically adjusts exploration rates and reward priorities.
 
 ---
 
-## Future Work (ideas)
+**Epsilon Decay – Exploration vs Exploitation:**
 
-- **Supply truck:** Implement a supply truck controlled directly by the Field Marshal (LLM), autonomously managing dynamic resupply of platoons based on the current state of the battlefield.
-- **Map expansion:** Further scale the grid beyond 100×100 to accommodate new air and ground units, with procedural generation adapted to the new dimensions.
-- **Render improvements:** Enhance the Pygame interface with HP indicators over sprites, a real-time statistics panel, persistent smoke effects and per-agent status visualization.
-- **Neural network policy:** Replace tabular Q-Learning with a DQN or PPO policy for the commander agents, using the existing `ObsNormWrapper` for input normalisation.
+Here you can see what the Field Marshal actually does. The red team's epsilon was raised multiple times throughout training; at episodes ~1,500, ~2,500, ~3,500, ~5,000, and ~5,500; peaking as high as 0.5 on one intervention. Each of these resets corresponds to the Allied Field Marshal detecting that red was stagnating and forcing it to try new tactics. Blue's epsilon was also reset twice, visible as the two small steps in the blue command curve. The capture agent (orange) is the slowest to converge, reaching the minimum only around episode 9,000, which makes sense given that navigation across a 100×100 map involves far more state space than attack or defense decisions.
+
+![Epsilon decay](readme_resources/epsilon_decay.png)
+
+---
+
+**Win Rate and Captures per Episode:**
+
+Blue peaks at 80–90% win rate around episodes 2,000–4,000. From that point it falls progressively to ~50–60% by episode 10,000 as red adapts. This is the clearest coevolutionary dynamic in the project: blue finds a dominant strategy, the Allied Field Marshal raises red's exploration until red finds a counter, and the win rate converges toward a competitive equilibrium. The captures graph shows a similar story; red initially controls all three objectives in the first episodes while blue is still exploring, then blue catches up to ~1.5 objectives per episode, and both teams stabilize around 1.5 by the end.
+
+![Win rate and captures](readme_resources/win_rate_and_captures.png)
+
+---
+
+**Attack and Defense Agents – Q-values and Policy:**
+
+The attack agent has learned the correct behaviour: when no enemy is in range, Don't shoot is clearly preferred (Q = 0.8 vs 0.3 for Shoot). When an enemy is in range, Shoot wins by a large margin (Q = 4.6 vs 3.4). The separation between the two states is the highest recorded, showing that the agent has built a well-differentiated Q-table.
+
+The defense agent has also learned a reasonable policy. When there is no enemy nearby and no cover, it seeks cover opportunistically (Take cover). When it already has Bush or Wall protection, it stays put to avoid wasting fuel. When an enemy is nearby and it is already behind a Wall, it stays, correctly judging that moving would expose it. All state values are negative, which is expected: defense never earns direct positive rewards, it only reduces damage taken.
+
+![Attack and defense agents](readme_resources/attack_defense_policy.png)
+
+---
+
+**Capture Agent – Policy and State Values:**
+
+At close and medium distances the policy is coherent: the agent moves Up when the objective is above, Down when it is below, Right when it is to the right, and Left when it is to the left. State values are positive in these ranges (1–7), indicating that the agent has learned that moving toward the objective is genuinely worthwhile. At far distances (>7 tiles) the policy becomes noisier and some values turn negative, which is expected, the agent visits those long-range states less frequently during training and has less opportunity to refine them.
+
+![Capture agent policy](readme_resources/capture_agent_policy.png)
+
+---
+
+**Commander Agent – Policy and State Values:**
+
+The command agent shows its richest Q-table, with a maximum state value of 1,082 (enemy in range, high HP, normal ammo), roughly double the values seen in earlier checkpoints, indicating much deeper learning.
+
+With normal ammo, the policy is tactically coherent: Attack when HP is mid or high and an enemy is in range, Resupply when HP is low and an enemy is in range (prioritising survival over fighting), and Capture or Resupply when there is no threat. With low ammo, the policy shifts cleanly toward Attack when an enemy is present and Resupply otherwise, the agent learned that conserving ammo matters and that running dry in a firefight is dangerous. The state value gradient is clear in both heatmaps: values increase from bottom-left (low HP, no threat) to top-right (high HP, enemy in range), which is exactly the expected pattern for an offensive unit.
+
+![Command agent policy](readme_resources/command_agent_policy.png)
+
+---
+
+The plots are automatically generated at the end of training using `metrics_and_plotter.py`, which logs per episode the total reward, duration, TD error, captures, and the epsilon of each agent type, and saves them in the folder configured in `env_config.py` (`PLOTS_SAVE_PATH`).
 
 ---
 
 ## Authors
 
+
 | Name                 | GitHub          |
-|----------------------|-----------------|
+| -------------------- | --------------- |
 | Alejandro Rodriguez  | @alejandror5803 |
 | Marco Antonio Benali | @marcobenali    |
 | Gaspar Muñoz         | @GasparMJ       |
