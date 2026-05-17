@@ -74,7 +74,7 @@ The system is organized into two hierarchical levels:
 
 The Luftwaffe adds a German JU-87 Stuka that performs bombing runs on Allied platoons. Its logic combines two AI techniques covered in class.
 
-#### 1. Markov Chain (Topic 5) — Operational lifecycle
+#### 1. Markov Chain — Operational lifecycle
 
 The aircraft's lifecycle is modelled as a discrete Markov Chain with 6 states:
 
@@ -102,7 +102,7 @@ Theoretical statistics computed at initialisation from the chain:
 | Expected missions before shootdown | ~5.4     |
 
 
-#### 2. Particle Swarm Optimization (Topic 4) — Target selection
+#### 2. Particle Swarm Optimization (PSO) — Target selection
 
 Before each mission, `pyswarm.pso()` is used to find the map coordinate `(x, y)` that maximises expected blast damage on enemy platoons.
 
@@ -131,7 +131,7 @@ A configurable delay (`START_DELAY = 50 steps`) prevents the aircraft from bombi
 
 ### Field Marshal — Strategic Advisor — `agents/field_marshal.py`
 
-Two independent Field Marshals — one per team — act as LLM-based strategic advisors using the **smolagents** `ToolCallingAgent` (Topic 3). They are called every `FM_STRATEGY_INTERVAL = 1000` episodes (after a warmup of 1500 episodes) to avoid burning API quota, keeping the last directive active between calls.
+Two independent Field Marshals — one per team — act as LLM-based strategic advisors using the **smolagents** `ToolCallingAgent`. They are called every `FM_STRATEGY_INTERVAL = 1000` episodes (after a warmup of 1500 episodes) to avoid burning API quota, keeping the last directive active between calls.
 
 If `smolagents` is not installed or the API call fails, both fall back silently to their rule-based equivalents.
 
@@ -173,9 +173,8 @@ After each FM call, each blue commander's epsilon is set individually based on t
 
 
 | Multiplier range | Epsilon range |
-| ---------------- | ------------- |
-| [0.5, 2.5]       | [0.05, 0.70]  |
-
+|-----------------|---------------|
+| [0.5, 2.5] | [0.05, 0.70] |
 
 ---
 
@@ -185,12 +184,10 @@ After each FM call, each blue commander's epsilon is set individually based on t
 
 **Tools provided to the LLM:**
 
-
-| Tool                            | Arguments                                   | Purpose                                  |
-| ------------------------------- | ------------------------------------------- | ---------------------------------------- |
-| `get_allied_battle_performance` | red_win_rate, avg_red_alive, avg_blue_alive | Red team performance report              |
-| `get_squad_stats`               | squad_epsilons_csv, squad_q_means_csv       | Per-squad exploration and Q-value status |
-
+| Tool | Arguments | Purpose |
+|------|-----------|---------|
+| `get_allied_battle_performance` | red_win_rate, avg_red_alive, avg_blue_alive | Red team performance report |
+| `get_squad_stats` | squad_epsilons_csv, squad_q_means_csv | Per-squad exploration and Q-value status |
 
 The 12 red commanders are grouped into **4 squads of 3** (squad 0 = cmds 0–2, squad 1 = cmds 3–5, etc.) to match the 4-unit structure of the blue team.
 
@@ -442,6 +439,7 @@ When a platoon is hit, an animated explosion visual effect is displayed over its
 
 **LLM interaction:**
 
+![LLM](readme_resources/LLM.png)
 ![LLM interaction](readme_resources/LLM_interaction.png)
 
 ---
