@@ -922,7 +922,7 @@ class NormandyEnv(gym.Env):
             print("pygame not installed, cannot render")
             return
 
-        PANEL_WIDTH = 220   # side stats panel width in pixels
+        PANEL_WIDTH = 260   # side stats panel width in pixels
         cell_size   = 900 // MAP_SIZE
 
         if self.window is None:
@@ -1162,7 +1162,7 @@ class NormandyEnv(gym.Env):
         # ── STATS PANEL (right side) ─────────────────────────────────────────
         px = 908   # left edge of panel
         py = 10
-        font_panel  = pygame.font.Font(None, 20)
+        font_panel  = pygame.font.Font(None, 19)
         font_header = pygame.font.Font(None, 22)
 
         def panel_text(text, color=(220, 220, 220), bold=False):
@@ -1170,78 +1170,82 @@ class NormandyEnv(gym.Env):
             f = font_header if bold else font_panel
             surf = f.render(text, True, color)
             self.window.blit(surf, (px, py))
-            py += surf.get_height() + 3
+            py += surf.get_height() + 2
 
         def panel_separator(color=(50, 60, 75)):
             nonlocal py
             pygame.draw.line(self.window, color, (px, py), (px + PANEL_WIDTH - 16, py), 1)
-            py += 6
+            py += 5
 
-        # ── Episode / Step ────────────────────────────────────────────────────
-        panel_text("-- BATTLE STATUS --", (180, 200, 255), bold=True)
-        panel_text(f"Episode : {self.episode}", (200, 200, 255))
-        panel_text(f"Step    : {self.step_count}", (200, 200, 255))
+        # battle status
+        panel_text("Battle Status", (180, 200, 255), bold=True)
+        panel_text(f"  Episode: {self.episode}", (200, 200, 255))
+        panel_text(f"  Step: {self.step_count}", (200, 200, 255))
         if self.capture_countdown is not None:
-            panel_text(f"Overtime: {self.capture_countdown}", (255, 80, 80))
+            panel_text(f"  Overtime: {self.capture_countdown}", (255, 80, 80))
         panel_separator()
 
-        # ── Capture points ────────────────────────────────────────────────────
-        panel_text("━━ OBJECTIVES ━━", (255, 215, 0), bold=True)
+        # capture points
+        panel_text("Objectives", (255, 215, 0), bold=True)
         for name in ['A', 'B', 'C']:
             blue_holds = self.captured[name]
             red_holds  = self.red_captured[name]
             if blue_holds:
-                status, col = "BLUE ", (80, 140, 255)
+                status, col = "blue", (80, 140, 255)
             elif red_holds:
-                status, col = "RED  ", (255, 80, 80)
+                status, col = "red", (255, 80, 80)
             else:
-                status, col = "FREE   ", (180, 180, 180)
-            panel_text(f"  {name} : {status}", col)
+                status, col = "free", (180, 180, 180)
+            panel_text(f"  {name}: {status}", col)
         panel_separator()
 
-        # ── Team overview ─────────────────────────────────────────────────────
+        # team overview
         blue_alive  = sum(1 for p in self.blue_pelotons if p['num_tanks'] > 0)
         red_alive   = sum(1 for p in self.red_pelotons  if p['num_tanks'] > 0)
         blue_tanks  = sum(p['num_tanks'] for p in self.blue_pelotons)
         red_tanks   = sum(p['num_tanks'] for p in self.red_pelotons)
 
-        panel_text("━━ FORCES ━━", (200, 255, 200), bold=True)
-        panel_text(f"BLUE  pel:{blue_alive}/{len(self.blue_pelotons)}  tnk:{blue_tanks}", (80, 160, 255))
-        panel_text(f"RED   pel:{red_alive}/{len(self.red_pelotons)}  tnk:{red_tanks}", (255, 100, 100))
+        panel_text("Forces", (200, 255, 200), bold=True)
+        panel_text(f"  Blue: {blue_alive}/{len(self.blue_pelotons)} pel  {blue_tanks} tanks", (80, 160, 255))
+        panel_text(f"  Red:  {red_alive}/{len(self.red_pelotons)} pel  {red_tanks} tanks", (255, 100, 100))
         panel_separator()
 
-        # ── Blue peloton detail ───────────────────────────────────────────────
-        panel_text("━━ BLUE PELOTONS ━━", (80, 160, 255), bold=True)
+        # blue pelotons (one line each)
+        panel_text("Blue Pelotons", (80, 160, 255), bold=True)
         for i, pel in enumerate(self.blue_pelotons):
             if pel['num_tanks'] <= 0:
-                panel_text(f"  B{i}  DESTROYED", (100, 100, 120))
+                panel_text(f"  B{i}: destroyed", (110, 110, 130))
                 continue
             max_hp  = efg.TIGER_PELOTON_HP
             hp_pct  = int(pel['hp'] / max_hp * 100)
             hp_col  = (0, 210, 60) if hp_pct > 50 else (255, 180, 0) if hp_pct > 25 else (220, 60, 60)
-            panel_text(f"  B{i} HP:{hp_pct:3d}%  TNK:{pel['num_tanks']}", hp_col)
-            panel_text(f"     AMM:{pel['ammo']:3d}  FUEL:{pel['fuel']:4d}", (160, 160, 200))
+            panel_text(
+                f"  B{i} HP:{hp_pct:3d}% T:{pel['num_tanks']} A:{pel['ammo']:2d} F:{pel['fuel']:4d}",
+                hp_col,
+            )
         panel_separator()
 
-        # ── Red peloton detail ────────────────────────────────────────────────
-        panel_text("━━ RED PELOTONS ━━", (255, 100, 100), bold=True)
+        # red pelotons (one line each)
+        panel_text("Red Pelotons", (255, 100, 100), bold=True)
         for i, pel in enumerate(self.red_pelotons):
             if pel['num_tanks'] <= 0:
-                panel_text(f"  R{i} ✖ DESTROYED", (100, 100, 120))
+                panel_text(f"  R{i}: destroyed", (110, 110, 130))
                 continue
             max_hp  = efg.SHERMAN_PELOTON_HP
             hp_pct  = int(pel['hp'] / max_hp * 100)
             hp_col  = (0, 210, 60) if hp_pct > 50 else (255, 180, 0) if hp_pct > 25 else (220, 60, 60)
-            panel_text(f"  R{i} HP:{hp_pct:3d}%  TNK:{pel['num_tanks']}", hp_col)
-            panel_text(f"     AMM:{pel['ammo']:3d}  FUEL:{pel['fuel']:4d}", (200, 160, 160))
+            panel_text(
+                f"  R{i} HP:{hp_pct:3d}% T:{pel['num_tanks']} A:{pel['ammo']:2d} F:{pel['fuel']:4d}",
+                hp_col,
+            )
 
-        # ── Luftwaffe status panel ─────────────────────────────────────────────
+        # luftwaffe
         if self.luftwaffe_agent is not None:
             panel_separator()
-            panel_text("-- LUFTWAFFE --", (255, 240, 120), bold=True)
+            panel_text("Luftwaffe", (255, 240, 120), bold=True)
             lw = self.luftwaffe_agent
             if not lw.is_active:
-                panel_text("  X SHOT DOWN", (120, 120, 120))
+                panel_text("  shot down", (120, 120, 120))
             else:
                 state_colors = {
                     "AVAILABLE": (100, 255, 100),
@@ -1251,15 +1255,14 @@ class NormandyEnv(gym.Env):
                     "REARMING":  (180, 180, 180),
                 }
                 sc = state_colors.get(lw.state_name, (220, 220, 220))
-                panel_text(f"  State  : {lw.state_name}", sc)
+                panel_text(f"  State: {lw.state_name}", sc)
                 panel_text(f"  Missions: {lw.missions_done}", (220, 220, 180))
                 if lw.current_target:
                     tx_p, ty_p = lw.current_target
-                    panel_text(f"  Target : ({tx_p},{ty_p})", (255, 200, 80))
-                # Show remaining delay before first sortie
+                    panel_text(f"  Target: ({tx_p},{ty_p})", (255, 200, 80))
                 steps_until = lw.START_DELAY - self.step_count
                 if steps_until > 0:
-                    panel_text(f"  Sortie in: {steps_until} steps", (160, 160, 160))
+                    panel_text(f"  Sortie in: {steps_until}", (160, 160, 160))
 
         # ── Luftwaffe on-map visualisation ────────────────────────────────────
         if self.luftwaffe_agent is not None and self.luftwaffe_agent.is_active:
