@@ -249,7 +249,7 @@ class SmolAgentsFieldMarshal:
                 max_steps=4,
             )
             self._available = True
-            print(f"[FieldMarshal] smolagents ready -- model: {model_id}")
+            print(f"[FieldMarshal] smolagents ready")
 
         except ImportError as exc:
             print(f"[FieldMarshal] smolagents import error ({exc}) -- using rule-based fallback.")
@@ -507,7 +507,7 @@ class AlliedFieldMarshal:
                 max_steps=3,
             )
             self._available = True
-            print(f"[AlliedMarshal] smolagents ready -- model: {model_id}")
+            print(f"[AlliedMarshal] smolagents ready")
 
         except ImportError as exc:
             print(f"[AlliedMarshal] smolagents import error ({exc}) -- using rule-based fallback.")
