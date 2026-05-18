@@ -311,10 +311,13 @@ class SmolAgentsFieldMarshal:
         except Exception as exc:
             err = str(exc).lower()
             if "rate limit" in err or "429" in err:
-                self._available = False
+                # fallback for this interval only — next FM call will retry the API
                 self._last_strategy = self._fallback.update_strategy(stats)
                 self._last_strategy["source"] = "rate_limit_fallback"
-                print("[FieldMarshal] rate limit reached -- switching to rule-based fallback.")
+                print(
+                    "[FieldMarshal] rate limit - rule-based fallback this call; "
+                    "will retry LLM on next FM interval."
+                )
                 return self._last_strategy
             print("[FieldMarshal] LLM call failed -- keeping last strategy.")
             return self._last_strategy
@@ -559,10 +562,13 @@ class AlliedFieldMarshal:
         except Exception as exc:
             err = str(exc).lower()
             if "rate limit" in err or "429" in err:
-                self._available = False
+                # fallback for this interval only — next FM call will retry the API
                 self._last_strategy = self._fallback.update_strategy(stats)
                 self._last_strategy["source"] = "rate_limit_fallback"
-                print("[AlliedMarshal] rate limit reached -- switching to rule-based fallback.")
+                print(
+                    "[AlliedMarshal] rate limit - rule-based fallback this call; "
+                    "will retry LLM on next FM interval."
+                )
                 return self._last_strategy
             print("[AlliedMarshal] LLM call failed -- keeping last strategy.")
             return self._last_strategy

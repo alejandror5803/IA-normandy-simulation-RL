@@ -1186,7 +1186,7 @@ class NormandyEnv(gym.Env):
         panel_separator()
 
         # ── Capture points ────────────────────────────────────────────────────
-        panel_text("━━ OBJECTIVES ━━", (255, 215, 0), bold=True)
+        panel_text(" OBJECTIVES ", (255, 215, 0), bold=True)
         for name in ['A', 'B', 'C']:
             blue_holds = self.captured[name]
             red_holds  = self.red_captured[name]
@@ -1205,13 +1205,13 @@ class NormandyEnv(gym.Env):
         blue_tanks  = sum(p['num_tanks'] for p in self.blue_pelotons)
         red_tanks   = sum(p['num_tanks'] for p in self.red_pelotons)
 
-        panel_text("━━ FORCES ━━", (200, 255, 200), bold=True)
+        panel_text(" FORCES ", (200, 255, 200), bold=True)
         panel_text(f"BLUE  pel:{blue_alive}/{len(self.blue_pelotons)}  tnk:{blue_tanks}", (80, 160, 255))
         panel_text(f"RED   pel:{red_alive}/{len(self.red_pelotons)}  tnk:{red_tanks}", (255, 100, 100))
         panel_separator()
 
         # ── Blue peloton detail ───────────────────────────────────────────────
-        panel_text("━━ BLUE PELOTONS ━━", (80, 160, 255), bold=True)
+        panel_text(" BLUE PELOTONS ", (80, 160, 255), bold=True)
         for i, pel in enumerate(self.blue_pelotons):
             if pel['num_tanks'] <= 0:
                 panel_text(f"  B{i}  DESTROYED", (100, 100, 120))
@@ -1224,10 +1224,10 @@ class NormandyEnv(gym.Env):
         panel_separator()
 
         # ── Red peloton detail ────────────────────────────────────────────────
-        panel_text("━━ RED PELOTONS ━━", (255, 100, 100), bold=True)
+        panel_text(" RED PELOTONS ", (255, 100, 100), bold=True)
         for i, pel in enumerate(self.red_pelotons):
             if pel['num_tanks'] <= 0:
-                panel_text(f"  R{i} ✖ DESTROYED", (100, 100, 120))
+                panel_text(f"  R{i} - DESTROYED", (100, 100, 120))
                 continue
             max_hp  = efg.SHERMAN_PELOTON_HP
             hp_pct  = int(pel['hp'] / max_hp * 100)
@@ -1238,7 +1238,7 @@ class NormandyEnv(gym.Env):
         # ── Luftwaffe status panel ─────────────────────────────────────────────
         if self.luftwaffe_agent is not None:
             panel_separator()
-            panel_text("-- LUFTWAFFE --", (255, 240, 120), bold=True)
+            panel_text(" LUFTWAFFE ", (255, 240, 120), bold=True)
             lw = self.luftwaffe_agent
             if not lw.is_active:
                 panel_text("  X SHOT DOWN", (120, 120, 120))

@@ -20,9 +20,9 @@ META_DEFENSE  = 2   # defense_agent decides whether to seek cover
 META_RESUPPLY = 3   # directly resupply at the nearest capture point
 
 # rewards / penalties
-R_CAPTURE_A_C   = 100
-R_CAPTURE_B     = 300
-R_DESTROY_ENEMY = 200   # higher to make killing enemies worth delegating to attack_agent
+R_CAPTURE_A_C   = 200 #100
+R_CAPTURE_B     = 400 #300
+R_DESTROY_ENEMY = 200   # 200 higher to make killing enemies worth delegating to attack_agent
 R_RESUPPLY      = 10
 R_WIN           = 1000
 P_LOSE          = -1000 # symmetric magnitude with R_WIN to avoid high-variance returns
