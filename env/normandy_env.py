@@ -623,6 +623,7 @@ class NormandyEnv(gym.Env):
                     for i in range(NUM_RED):  red_rewards[i] += R_WIN
                     for i in range(NUM_BLUE): rewards[i]     += P_LOSE
                 # draw: no extra reward
+                terminated = True
 
         truncated = False
 

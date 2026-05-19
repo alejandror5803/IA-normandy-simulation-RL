@@ -119,8 +119,7 @@ class FogOfWarWrapper(gym.ObservationWrapper):
         result = []
         for pel_obs in obs:
             masked = pel_obs.copy()
-            enemy_dist = int(pel_obs[self.ENEMY_DIST_IDX])
-            if enemy_dist > self.visibility_range:
+            if int(pel_obs[self.ENEMY_NEARBY_IDX]) == 0:
                 masked[self.ENEMY_NEARBY_IDX] = 0.0
                 masked[self.ENEMY_DIST_IDX]   = 9.0
             result.append(masked)

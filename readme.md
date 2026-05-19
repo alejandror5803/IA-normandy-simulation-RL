@@ -20,7 +20,6 @@ Link: [https://github.com/alejandror5803/IA-normandy-simulation-RL](https://gith
 - Installation
 - Usage
 - Results
-- Future Work
 - Authors
 
 ---
@@ -62,7 +61,7 @@ The system is organized into two hierarchical levels:
 - **Commander Agent:** Coordinates the platoon's sub-agents. Selects which sub-agent takes control each step.
 - **Attack Agent:** Decides whether to attack the nearest enemy within its observation range. It is penalized if an enemy is present and it does not fire; it is rewarded for each successful hit.
 - **Capture Agent:** Moves the platoon toward the designated objective. It is rewarded for getting closer and penalized for moving away.
-- **Defense Agent:** Manages the defense of already captured points. Coordinates the platoon's defensive positioning when assigned to hold an objective.
+- **Defense Agent:** When the commander picks META_DEFENSE, this agent decides whether to stay put or move to a neighbouring cell with better cover (bushes, forest, walls).
 - **Luftwaffe Agent:** German air support unit that operates independently of the ground platoons. See dedicated section below.
 - **Field Marshal (×2):** One LLM-based strategic advisor per team. See dedicated section below.
 
@@ -96,9 +95,9 @@ Theoretical statistics computed at initialisation from the chain:
 
 | Metric                             | Value    |
 | ---------------------------------- | -------- |
-| Cycle length                       | 20 steps |
+| Cycle length                       | 27 steps (1+5+1+5+15; rearm is random 15–25 in `env_config`) |
 | P(survive one mission)             | 81.5%    |
-| Availability                       | ~5%      |
+| Availability                       | ~3.7%    |
 | Expected missions before shootdown | ~5.4     |
 
 
@@ -168,6 +167,8 @@ r += cfg.P_STEP                         # add back at 1×
 
 A multiplier of `2.0` on captures doubles the gradient signal for capture actions in the Q-table update — much more effective than a flat reward bonus. The step penalty is deliberately excluded from scaling.
 
+The same multipliers are also passed into `normandy_env` via `set_fm_reward_mults()` and applied when red commanders update their Q-tables (inside `step()`). So both teams feel the reshaped reward signal; only blue gets the per-commander epsilon from this FM.
+
 **Option B — Per-commander epsilon:**
 After each FM call, each blue commander's epsilon is set individually based on the LLM's assessment of its Q-table status (confident / learning / confused).
 
@@ -197,16 +198,17 @@ The 12 red commanders are grouped into **4 squads of 3** (squad 0 = cmds 0–2, 
 RED_EPS=0.15,0.20,0.15,0.25  RATIONALE=Squad 2 is getting wiped out — push exploration.
 ```
 
-**Option B only (no reward multipliers for red):**
-Red agents receive individual epsilon control per squad. Reward multipliers are not applied to red — giving red the same multipliers as blue when blue needs to capture would make red also learn to capture harder, which is counterproductive for the intended training dynamics.
+**Option B — Per-squad epsilon (red only):**
+The Allied FM only adjusts exploration: four `RED_EPS` values (one per squad of 3 commanders). It does not output capture/kill/defend multipliers — those come from the German FM and already affect red learning in the env as described above.
 
-#### API call budget
+#### Estimated API call budget
 
+First call after warmup at episode 1500, then every 1000 episodes (`1500, 2500, 3500, …`).
 
 | Training length | Calls (German FM) | Calls (Allied FM) | Total |
 |-----------------|-------------------|-------------------|-------|
-| 5 000 episodes | 10 | 10 | 20 |
-| 10 000 episodes | 20 | 20 | 40 |
+| 5 000 episodes | 4 | 4 | 8 |
+| 10 000 episodes | 9 | 9 | 18 |
 
 ---
 
@@ -218,7 +220,6 @@ IA-normandy-simulation-RL/
 ├── requirements.txt
 ├── training_and_eval.py            # Training loop
 ├── readme.md
-├── IA-normandy-simulation-RL.zip   # Backup/export copy
 │
 ├── agents/
 │   ├── __init__.py
@@ -253,6 +254,7 @@ IA-normandy-simulation-RL/
 ├── readme_resources/               # Static images used inside README
 │   ├── terminal_output.png
 │   ├── render.png
+│   ├── LLM.png
 │   ├── LLM_interaction.png
 │   ├── training_curves.png
 │   ├── epsilon_decay.png
@@ -321,13 +323,13 @@ When HP drops below 100, a tank is destroyed and the platoon's firepower decreas
 
 ### Observation Vector (per platoon)
 
-Each platoon receives a vector of 16 integer values in the range [0–9]:
+Each platoon receives a vector of 16 numeric features (not all share the same max):
 
 | Index | Name         | Range | Description                                           |
 |-------|--------------|-------|-------------------------------------------------------|
 | 0     | hp_hundreds  | 0–5   | Platoon HP in hundreds                                |
-| 1     | fuel_level   | 0–5   | Fuel level (fuel // 20)                               |
-| 2     | ammo_level   | 0–5   | Ammunition level (ammo // 20)                         |
+| 1     | fuel_level   | 0–25  | `fuel // 20` (full tank = 500 fuel)                   |
+| 2     | ammo_level   | 0–1   | `ammo // 20` (max ammo = 25 per platoon)              |
 | 3     | num_tanks    | 0–5   | Remaining operational tanks                           |
 | 4     | cover_type   | 0–2   | Type of cover in the current cell                     |
 | 5     | enemy_nearby | 0–1   | Enemy within ≤ 12 cells (ENEMY_NEARBY_RANGE)          |
@@ -393,9 +395,25 @@ We have used the following:
 
 **Steps:**
 
-1. Clone repository
-2. (Recommended) Create a virtual environment
-3. Install dependencies
+1. Clone the repository and open a terminal in the project folder.
+
+2. (Recommended) Create and activate a virtual environment:
+
+```bash
+python -m venv .venv
+
+# Windows (PowerShell)
+.\.venv\Scripts\Activate.ps1
+
+# Linux / macOS
+source .venv/bin/activate
+```
+
+3. Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
 
 **Main dependencies:** `gymnasium`, `pygame`, `numpy`, `matplotlib`, `pyswarm`
 
@@ -419,11 +437,21 @@ export HF_TOKEN="your_hf_token_here"
 
 ## Usage
 
-### Training with Pygame Visualization
+### Training
 
-To enable rendering, instantiate the environment with `render_mode = "human"` in `training_and_eval.py`.
-The environment only renders every `render_every` episodes (configurable in `env/env_config.py`) so as not to reduce training speed.
-When a platoon is hit, an animated explosion visual effect is displayed over its position (orange → red → white, lasting 4 frames).
+From the project root (with the venv active if you use one):
+
+```bash
+python training_and_eval.py
+```
+
+By default this runs **10 000 episodes** with Pygame rendering (`render_mode = "human"` in `training_and_eval.py`). The window only updates every `render_every` episodes (see `RENDER_EVERY` in `env/env_config.py`, and the call at the bottom of `training_and_eval.py`) so training does not slow down too much.
+
+Checkpoints and plots are written under `results/` (`qtables.npz` plus the PNG curves). To start from scratch instead of loading a previous checkpoint, change `resume=False` in the `train(...)` call at the end of `training_and_eval.py`.
+
+When a platoon is hit, an explosion effect is shown on screen (orange -> red -> white, 4 frames).
+
+To train **without** opening a window, set `render_mode=None` in the `make_env(...)` call inside `train()`.
 
 ---
 
